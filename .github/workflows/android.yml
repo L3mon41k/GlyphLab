@@ -30,11 +30,18 @@ jobs:
         with:
           packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
 
+      - name: Download Nothing Glyph Matrix SDK
+        run: |
+          mkdir -p app/libs
+          curl -fL --retry 3 \
+            https://raw.githubusercontent.com/Nothing-Developer-Programme/GlyphMatrix-Developer-Kit/main/glyph-matrix-sdk-2.0.aar \
+            -o app/libs/glyph-matrix-sdk-2.0.aar
+
       - name: Build debug APK
         run: gradle assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: GlyphLab-0.1.0-debug
+          name: GlyphLab-0.2.0-debug
           path: app/build/outputs/apk/debug/app-debug.apk
