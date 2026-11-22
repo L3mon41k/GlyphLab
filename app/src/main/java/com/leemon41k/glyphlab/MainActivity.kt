@@ -35,6 +35,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -277,7 +278,7 @@ private fun GlyphLabEditor(
                             Slider(opacity, { opacity = it }, colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent))
                         }
                         EditorMode.ANIMATION, EditorMode.TOYS -> {
-                            Text("Скорость: \${String.format("%.1f", frameSpeed)}×", color = Muted, fontSize = 11.sp)
+                            Text("Скорость: ${String.format("%.1f", frameSpeed)}×", color = Muted, fontSize = 11.sp)
                             Slider(frameSpeed, { frameSpeed = it }, valueRange = 0.2f..3f, colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent))
                             Text("Прозрачность", color = Muted, fontSize = 11.sp)
                             Slider(opacity, { opacity = it }, colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent))
@@ -414,17 +415,18 @@ private fun GenerationAnimation(letters: List<Char>, progress: Int) {
 
 @Composable
 private fun PixelLetter(character: Char) {
-    val seed = character.code
-    Canvas(Modifier.size(width = 42.dp, height = 58.dp)) {
-        val cols = 5
-        val rows = 7
-        val gap = 3.dp.toPx()
-        val cell = (size.width - gap * (cols - 1)) / cols
-        for (y in 0 until rows) for (x in 0 until cols) {
-            val bit = ((seed * 31 + x * 17 + y * 23 + x * y * 7) xor (seed shr ((x + y) % 5))) and 1
-            if (bit == 1 || x == 0 || x == cols - 1 || y == 0 || y == rows - 1) {
-                drawRect(Accent.copy(alpha = if (bit == 1) 0.95f else 0.28f), Offset(x * (cell + gap), y * (cell + gap)), Size(cell, cell))
-            }
-        }
+    Box(
+        Modifier.size(width = 42.dp, height = 58.dp)
+            .background(Color(0xFF101012), RoundedCornerShape(5.dp))
+            .border(1.dp, Accent.copy(alpha = 0.45f), RoundedCornerShape(5.dp)),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            character.toString(),
+            color = Accent,
+            fontSize = 39.sp,
+            fontWeight = FontWeight.Black,
+            fontFamily = FontFamily.Monospace
+        )
     }
 }
