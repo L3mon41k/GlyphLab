@@ -156,7 +156,14 @@ class MainActivity : ComponentActivity() {
         }
         val memory = if (exit.rss > 0) "\nПамять процесса перед завершением: " + (exit.rss / 1024) + " МБ." else ""
         val details = exit.description?.takeIf { it.isNotBlank() }?.let { "\nСведения Android: $it" } ?: ""
-        return "$reason$memory$details"
+        val trace = runCatching {
+            exit.traceInputStream?.use { stream ->
+                stream.bufferedReader().readText().take(6000)
+            }
+        }.getOrNull()?.takeIf { it.isNotBlank() }
+        val stack = trace?.let { "\n\nСТЕК ОШИБКИ:\n$it" }
+            ?: "\n\nAndroid не предоставил стек ошибки для этого завершения."
+        return "$reason$memory$details$stack"
     }
 
     private fun startModelSetup() {
