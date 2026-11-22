@@ -149,7 +149,9 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private data class HistoryEntry(val layerKey: Int, val pixels: List<Boolean>, val groups: List<List<Int>>)\n\nprivate enum class EditorMode(val title: String) {
+private data class HistoryEntry(val layerKey: Int, val pixels: List<Boolean>, val groups: List<List<Int>>)
+
+private enum class EditorMode(val title: String) {
     DRAW("Рисунки"), ANIMATION("Анимации"), TOYS("Glyph Toys")
 }
 
