@@ -45,7 +45,7 @@ import com.nothing.ketchum.Glyph
 import com.nothing.ketchum.GlyphMatrixManager
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.drop
-import kotlinx.coroutines.flow.snapshotFlow
+import androidx.compose.runtime.snapshotFlow
 import kotlin.math.floor
 
 private const val MATRIX_SIZE = 25
