@@ -169,7 +169,14 @@ private fun GlyphLabEditor(
     var progress by remember { mutableIntStateOf(0) }
     val history = remember { mutableStateListOf<List<Boolean>>() }
     val redoHistory = remember { mutableStateListOf<List<Boolean>>() }
-    val animatedLetters = remember { mutableStateListOf('A', 'Я', '7') }
+    val animatedLetter = remember { mutableStateOf('A') }
+    val animationFrames = remember {
+        mutableStateListOf<SnapshotStateList<Boolean>>(
+            mutableStateListOf<Boolean>().apply { repeat(MATRIX_CELLS) { add(false) } }
+        )
+    }
+    var selectedFrame by remember { mutableIntStateOf(0) }
+    val activePixels = if (mode == EditorMode.ANIMATION) animationFrames[selectedFrame] else pixels
 
     LaunchedEffect(glyphVisible.value) {
         if (glyphVisible.value) snapshotFlow { pixels.toList() }.drop(1).collect { onUpdateGlyph(it) }
@@ -180,7 +187,7 @@ private fun GlyphLabEditor(
             progress = 0
             val alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZАБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ0123456789"
             repeat(100) { step ->
-                for (i in animatedLetters.indices) animatedLetters[i] = alphabet[Random.nextInt(alphabet.length)]
+                animatedLetter.value = alphabet[Random.nextInt(alphabet.length)]
                 progress = step + 1
                 delay(100)
             }
@@ -210,7 +217,7 @@ private fun GlyphLabEditor(
         if (dx * dx + dy * dy > (gridSide / 2f) * (gridSide / 2f)) return null
         return row * MATRIX_SIZE + column
     }
-    val litCount = pixels.count { it }
+    val litCount = activePixels.count { it }
 
     Surface(Modifier.fillMaxSize(), color = Color.Black) {
         Column(
@@ -247,7 +254,10 @@ private fun GlyphLabEditor(
                     }) { Icon(Icons.Default.Redo, "Redo", tint = if (redoHistory.isNotEmpty()) Color.White else Muted) }
                 }
             }
-            MatrixPreview(pixels, { index -> saveHistory(); pixels[index] = !pixels[index] }, ::pixelIndex)
+            MatrixPreview(activePixels, { index ->
+                if (mode == EditorMode.DRAW) saveHistory()
+                activePixels[index] = !activePixels[index]
+            }, ::pixelIndex)
             Spacer(Modifier.height(8.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("$litCount / 489 PIXELS", color = Muted, fontSize = 10.sp, letterSpacing = 1.sp)
@@ -260,6 +270,56 @@ private fun GlyphLabEditor(
                     val selected = mode == item
                     Box(Modifier.background(if (selected) Accent else Panel, RoundedCornerShape(50)).clickable { mode = item }.padding(horizontal = 16.dp, vertical = 11.dp)) {
                         Text(item.title, color = if (selected) Color.White else Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+            if (mode == EditorMode.ANIMATION) {
+                Spacer(Modifier.height(14.dp))
+                Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(18.dp)) {
+                    Column(Modifier.padding(14.dp)) {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text("КАДРЫ АНИМАЦИИ", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+                            Spacer(Modifier.weight(1f))
+                            Text("${animationFrames.size} КАДР.", color = Accent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(animationFrames.size) { index ->
+                                val selected = selectedFrame == index
+                                Column(
+                                    Modifier.width(76.dp)
+                                        .border(1.dp, if (selected) Accent else Color(0xFF3A3A3F), RoundedCornerShape(12.dp))
+                                        .background(if (selected) Color(0xFF261416) else Color(0xFF101012), RoundedCornerShape(12.dp))
+                                        .clickable { selectedFrame = index }
+                                        .padding(9.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Box(Modifier.size(42.dp).background(Color(0xFF080809), RoundedCornerShape(7.dp)), contentAlignment = Alignment.Center) {
+                                        Text(if (animationFrames[index].any { it }) "●" else "＋", color = if (animationFrames[index].any { it }) Accent else Muted, fontSize = 19.sp)
+                                    }
+                                    Spacer(Modifier.height(6.dp))
+                                    Text("КАДР ${index + 1}", color = if (selected) Accent else Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            item {
+                                Column(
+                                    Modifier.width(76.dp).height(83.dp)
+                                        .border(1.dp, Accent.copy(alpha = 0.7f), RoundedCornerShape(12.dp))
+                                        .background(Color(0xFF1D1113), RoundedCornerShape(12.dp))
+                                        .clickable {
+                                            animationFrames.add(mutableStateListOf<Boolean>().apply { repeat(MATRIX_CELLS) { add(false) } })
+                                            selectedFrame = animationFrames.lastIndex
+                                        }.padding(9.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center
+                                ) {
+                                    Text("+", color = Accent, fontSize = 27.sp, fontWeight = FontWeight.Light)
+                                    Text("НОВЫЙ", color = Accent, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Text("Выбран кадр ${selectedFrame + 1}. Рисуй его в матрице выше. Новый кадр всегда пустой.", color = Muted, fontSize = 10.sp)
                     }
                 }
             }
@@ -291,7 +351,7 @@ private fun GlyphLabEditor(
                     }
                     Spacer(Modifier.height(4.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { saveHistory(); pixels.indices.forEach { pixels[it] = false } }, modifier = Modifier.weight(1f)) {
+                        OutlinedButton(onClick = { if (mode == EditorMode.DRAW) saveHistory(); activePixels.indices.forEach { activePixels[it] = false } }, modifier = Modifier.weight(1f)) {
                             Icon(Icons.Default.Delete, null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("Очистить")
                         }
                         Button(onClick = {}, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Accent)) {
@@ -317,7 +377,7 @@ private fun GlyphLabEditor(
                     }
                     Spacer(Modifier.height(14.dp))
                     if (generating) {
-                        GenerationAnimation(animatedLetters.toList(), progress)
+                        GenerationAnimation(animatedLetter.value, progress)
                     } else if (generationFinished) {
                         Row(Modifier.fillMaxWidth().background(Color(0xFF1D1718), RoundedCornerShape(14.dp)).padding(13.dp), verticalAlignment = Alignment.Top) {
                             Icon(Icons.Default.Close, null, tint = Accent, modifier = Modifier.size(18.dp))
@@ -399,13 +459,11 @@ private fun MatrixPreview(pixels: SnapshotStateList<Boolean>, onPixel: (Int) -> 
 }
 
 @Composable
-private fun GenerationAnimation(letters: List<Char>, progress: Int) {
+private fun GenerationAnimation(letter: Char, progress: Int) {
     Column(Modifier.fillMaxWidth().background(Color(0xFF080809), RoundedCornerShape(16.dp)).padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Text("Г Е Н Е Р А Ц И Я", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
         Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            letters.forEach { PixelLetter(it) }
-        }
+        PixelLetter(letter)
         Spacer(Modifier.height(12.dp))
         LinearProgressIndicator(progress = { progress / 100f }, modifier = Modifier.fillMaxWidth().height(3.dp), color = Accent, trackColor = Color(0xFF303034))
         Spacer(Modifier.height(7.dp))
