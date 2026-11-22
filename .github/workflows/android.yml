@@ -1,4 +1,5 @@
 name: Build GlyphLab APK
+run-name: Action ${{ github.run_number }}
 
 on:
   push:
