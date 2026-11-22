@@ -60,9 +60,17 @@ private fun GlyphLabEditor() {
     } }
     val litCount = pixels.count { it }
 
+    fun isInsideMatrix(position: Offset, width: Float): Boolean {
+        val center = width / 2f
+        val dx = position.x - center
+        val dy = position.y - center
+        return dx * dx + dy * dy <= center * center
+    }
+
     fun pixelIndex(position: Offset, width: Float): Int? {
         if (width <= 0f || position.x < 0f || position.y < 0f ||
-            position.x >= width || position.y >= width
+            position.x >= width || position.y >= width ||
+            !isInsideMatrix(position, width)
         ) return null
         val cell = width / MATRIX_SIZE
         val column = floor(position.x / cell).toInt().coerceIn(0, MATRIX_SIZE - 1)
@@ -79,7 +87,6 @@ private fun GlyphLabEditor() {
                 .fillMaxSize()
                 .background(Color.Black)
                 .padding(horizontal = 20.dp)
-                // Extra top space keeps the title clear of the front camera.
                 .padding(top = 68.dp, bottom = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -102,7 +109,6 @@ private fun GlyphLabEditor() {
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1f)
-                    .background(Color(0xFF080808))
                     .pointerInput(Unit) {
                         detectTapGestures { offset ->
                             pixelIndex(offset, size.width.toFloat())?.let { index ->
@@ -127,19 +133,33 @@ private fun GlyphLabEditor() {
                     }
             ) {
                 val cell = size.width / MATRIX_SIZE
-                val radius = cell * 0.37f
+                val pixelSize = cell * 0.72f
+                val center = size.width / 2f
+                val radius = center
+
+                // The physical Glyph Matrix is circular, not a square panel.
+                drawCircle(
+                    color = Color(0xFF080808),
+                    radius = radius,
+                    center = Offset(center, center)
+                )
 
                 for (row in 0 until MATRIX_SIZE) {
                     for (column in 0 until MATRIX_SIZE) {
-                        val index = row * MATRIX_SIZE + column
-                        drawCircle(
-                            color = if (pixels[index]) Color.White else Color(0xFF303030),
-                            radius = radius,
-                            center = Offset(
-                                x = (column + 0.5f) * cell,
-                                y = (row + 0.5f) * cell
+                        val x = (column + 0.5f) * cell
+                        val y = (row + 0.5f) * cell
+                        val dx = x - center
+                        val dy = y - center
+
+                        // Keep each square LED fully inside the circular boundary.
+                        if (dx * dx + dy * dy <= (radius - pixelSize / 2f) * (radius - pixelSize / 2f)) {
+                            val index = row * MATRIX_SIZE + column
+                            drawRect(
+                                color = if (pixels[index]) Color.White else Color(0xFF303030),
+                                topLeft = Offset(x - pixelSize / 2f, y - pixelSize / 2f),
+                                size = androidx.compose.ui.geometry.Size(pixelSize, pixelSize)
                             )
-                        )
+                        }
                     }
                 }
             }
