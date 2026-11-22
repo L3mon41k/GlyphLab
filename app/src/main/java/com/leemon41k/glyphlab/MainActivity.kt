@@ -104,7 +104,7 @@ class MainActivity : ComponentActivity() {
         }
         try {
             val frame = IntArray(MATRIX_CELLS) { index ->
-                if (pixels.getOrNull(index) == true) 4095 else 0
+                if (pixels.getOrNull(index) == true) 2047 else 0
             }
             manager.setAppMatrixFrame(frame)
             glyphStatus.value = "РИСУНОК ОТПРАВЛЕН НА GLYPH MATRIX"
