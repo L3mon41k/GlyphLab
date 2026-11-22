@@ -149,12 +149,12 @@ class MainActivity : ComponentActivity() {
             ApplicationExitInfo.REASON_CRASH -> "Ошибка Java/Kotlin (необработанное исключение)."
             ApplicationExitInfo.REASON_CRASH_NATIVE -> "Аварийное завершение нативного кода. Возможен сбой LiteRT-LM."
             ApplicationExitInfo.REASON_LOW_MEMORY -> "Android завершил приложение из-за нехватки оперативной памяти."
-            ApplicationExitInfo.REASON_SIGNALED -> "Процесс завершён системным сигналом (код undefined)."
+            ApplicationExitInfo.REASON_SIGNALED -> "Процесс завершён системным сигналом (код " + exit.status + ")."
             ApplicationExitInfo.REASON_ANR -> "Приложение перестало отвечать системе."
             ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE -> "Android завершил приложение из-за чрезмерного расхода ресурсов."
             else -> "Неизвестная причина."
         }
-        val memory = if (exit.rss > 0) "\nПамять процесса перед завершением: NaN МБ." else ""
+        val memory = if (exit.rss > 0) "\nПамять процесса перед завершением: " + (exit.rss / 1024) + " МБ." else ""
         val details = exit.description?.takeIf { it.isNotBlank() }?.let { "\nСведения Android: $it" } ?: ""
         return "$reason$memory$details"
     }
