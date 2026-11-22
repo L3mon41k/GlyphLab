@@ -516,10 +516,15 @@ private fun MatrixPreview(
     onStrokeEnd: (List<Int>, Boolean) -> Unit,
     pixelIndex: (Offset, Float) -> Int?
 ) {
+    val currentPixels by rememberUpdatedState(pixels)
+    val currentOnTap by rememberUpdatedState(onTap)
+    val currentOnStrokeStart by rememberUpdatedState(onStrokeStart)
+    val currentOnStrokeUpdate by rememberUpdatedState(onStrokeUpdate)
+    val currentOnStrokeEnd by rememberUpdatedState(onStrokeEnd)
     Canvas(Modifier.fillMaxWidth().aspectRatio(1f)
         .pointerInput(Unit) {
             detectTapGestures { pos ->
-                pixelIndex(pos, size.width.toFloat())?.let(onTap)
+                pixelIndex(pos, size.width.toFloat())?.let(currentOnTap)
             }
         }
         .pointerInput(Unit) {
@@ -544,9 +549,9 @@ private fun MatrixPreview(
                 visited.clear()
                 lastIndex = pixelIndex(pos, size.width.toFloat()) ?: -1
                 if (lastIndex >= 0) {
-                    eraseMode = onStrokeStart(lastIndex)
+                    eraseMode = currentOnStrokeStart(lastIndex)
                     visited.add(lastIndex)
-                    onStrokeUpdate(visited.toList(), eraseMode)
+                    currentOnStrokeUpdate(visited.toList(), eraseMode)
                 }
             }, onDrag = { change, _ ->
                 val index = pixelIndex(change.position, size.width.toFloat())
@@ -557,7 +562,7 @@ private fun MatrixPreview(
                 }
                 change.consume()
             }, onDragEnd = {
-                if (visited.isNotEmpty()) onStrokeEnd(visited.toList(), eraseMode)
+                if (visited.isNotEmpty()) currentOnStrokeEnd(visited.toList(), eraseMode)
             }, onDragCancel = {
                 if (visited.isNotEmpty()) onStrokeEnd(visited.toList(), eraseMode)
             })
@@ -600,15 +605,25 @@ private fun GenerationAnimation(letter: Char, progress: Int) {
 @Composable
 private fun PixelLetter(character: Char) {
     val glyph = when (character) {
-        'A' -> listOf("01110", "10001", "10001", "11111", "10001", "10001", "10001")
-        'E' -> listOf("11111", "10000", "10000", "11110", "10000", "10000", "11111")
+        'A', 'А' -> listOf("01110", "10001", "10001", "11111", "10001", "10001", "10001")
+        'B', 'В' -> listOf("11110", "10001", "10001", "11110", "10001", "10001", "11110")
+        'C', 'С' -> listOf("01111", "10000", "10000", "10000", "10000", "10000", "01111")
+        'E', 'Е', 'Ё' -> listOf("11111", "10000", "10000", "11110", "10000", "10000", "11111")
         'F' -> listOf("11111", "10000", "10000", "11110", "10000", "10000", "10000")
-        'H' -> listOf("10001", "10001", "10001", "11111", "10001", "10001", "10001")
-        'I' -> listOf("11111", "00100", "00100", "00100", "00100", "00100", "11111")
-        'L' -> listOf("10000", "10000", "10000", "10000", "10000", "10000", "11111")
-        'O' -> listOf("01110", "10001", "10001", "10001", "10001", "10001", "01110")
-        'P' -> listOf("11110", "10001", "10001", "11110", "10000", "10000", "10000")
+        'H', 'Н' -> listOf("10001", "10001", "10001", "11111", "10001", "10001", "10001")
+        'I', 'І' -> listOf("11111", "00100", "00100", "00100", "00100", "00100", "11111")
+        'K', 'К' -> listOf("10001", "10010", "10100", "11000", "10100", "10010", "10001")
+        'L', 'Л' -> listOf("00111", "00100", "00100", "00100", "10100", "10100", "11000")
+        'M', 'М' -> listOf("10001", "11011", "10101", "10101", "10001", "10001", "10001")
+        'N', 'И' -> listOf("10001", "11001", "10101", "10011", "10001", "10001", "10001")
+        'O', 'О' -> listOf("01110", "10001", "10001", "10001", "10001", "10001", "01110")
+        'P', 'Р' -> listOf("11110", "10001", "10001", "11110", "10000", "10000", "10000")
         'S' -> listOf("01111", "10000", "10000", "01110", "00001", "00001", "11110")
+        'T', 'Т' -> listOf("11111", "00100", "00100", "00100", "00100", "00100", "00100")
+        'X', 'Х', 'Ж' -> listOf("10001", "10001", "01010", "00100", "01010", "10001", "10001")
+        'Y', 'У' -> listOf("10001", "10001", "01010", "00100", "00100", "00100", "00100")
+        'З' -> listOf("01110", "00001", "00001", "00110", "00001", "00001", "01110")
+        'Ч' -> listOf("10001", "10001", "10001", "01111", "00001", "00001", "00001")
         else -> listOf("11111", "00100", "00100", "00100", "00100", "00100", "00100")
     }
     Canvas(Modifier.padding(start = 12.dp).size(width = 58.dp, height = 72.dp)) {
