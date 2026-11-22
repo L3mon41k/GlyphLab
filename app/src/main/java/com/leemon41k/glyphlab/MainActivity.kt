@@ -292,7 +292,6 @@ private fun GlyphLabEditor(
             }
             MatrixPreview(
                 activePixels,
-                onPixel = { index -> applyStroke(listOf(index), activePixels[index]) },
                 onStroke = { indices, erase -> applyStroke(indices, erase) },
                 pixelIndex = ::pixelIndex
             )
@@ -468,7 +467,6 @@ private fun GlyphLabEditor(
 @Composable
 private fun MatrixPreview(
     pixels: SnapshotStateList<Boolean>,
-    onPixel: (Int) -> Unit,
     onStroke: (List<Int>, Boolean) -> Unit,
     pixelIndex: (Offset, Float) -> Int?
 ) {
@@ -477,7 +475,6 @@ private fun MatrixPreview(
             detectTapGestures { pos ->
                 pixelIndex(pos, size.width.toFloat())?.let { index ->
                     onStroke(listOf(index), pixels[index])
-                    onPixel(index)
                 }
             }
         }
@@ -497,7 +494,7 @@ private fun MatrixPreview(
                     val x = (x0 + (x1 - x0) * (step.toFloat() / steps)).toInt()
                     val y = (y0 + (y1 - y0) * (step.toFloat() / steps)).toInt()
                     val index = y * MATRIX_SIZE + x
-                    if (visited.add(index)) onPixel(index)
+                    visited.add(index)
                 }
             }
             detectDragGestures(onDragStart = { pos ->
@@ -506,7 +503,6 @@ private fun MatrixPreview(
                 if (lastIndex >= 0) {
                     eraseMode = pixels[lastIndex]
                     visited.add(lastIndex)
-                    onPixel(lastIndex)
                 }
             }, onDrag = { change, _ ->
                 val index = pixelIndex(change.position, size.width.toFloat())
