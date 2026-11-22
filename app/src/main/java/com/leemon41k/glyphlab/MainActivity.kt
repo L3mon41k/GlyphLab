@@ -17,12 +17,18 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -37,10 +43,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nothing.ketchum.Glyph
 import com.nothing.ketchum.GlyphMatrixManager
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.snapshotFlow
 import kotlin.math.floor
 
 private const val MATRIX_SIZE = 25
 private const val MATRIX_CELLS = MATRIX_SIZE * MATRIX_SIZE
+private const val GRID_SCALE = 0.86f
 
 class MainActivity : ComponentActivity() {
     private var glyphManager: GlyphMatrixManager? = null
@@ -62,6 +72,7 @@ class MainActivity : ComponentActivity() {
                 GlyphLabEditor(
                     glyphStatus = glyphStatus.value,
                     onShowOnGlyph = { pixels -> showOnGlyph(pixels) },
+                    onUpdateGlyph = { pixels -> updateGlyphFrame(pixels) },
                     onTurnOffGlyph = { turnOffGlyph() }
                 )
             }
@@ -96,20 +107,26 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun makeFrame(pixels: List<Boolean>) = IntArray(MATRIX_CELLS) { index ->
+        if (pixels.getOrNull(index) == true) 2047 else 0
+    }
+
     private fun showOnGlyph(pixels: List<Boolean>) {
-        val manager = glyphManager
-        if (!glyphReady || manager == null) {
+        if (!glyphReady || glyphManager == null) {
             glyphStatus.value = "СНАЧАЛА ДОЖДИТЕСЬ ПОДКЛЮЧЕНИЯ GLYPH"
             return
         }
+        updateGlyphFrame(pixels)
+        glyphStatus.value = "ОТОБРАЖЕНИЕ GLYPH ВКЛЮЧЕНО"
+    }
+
+    private fun updateGlyphFrame(pixels: List<Boolean>) {
+        val manager = glyphManager
+        if (!glyphReady || manager == null) return
         try {
-            val frame = IntArray(MATRIX_CELLS) { index ->
-                if (pixels.getOrNull(index) == true) 2047 else 0
-            }
-            manager.setAppMatrixFrame(frame)
-            glyphStatus.value = "РИСУНОК ОТПРАВЛЕН НА GLYPH MATRIX"
+            manager.setAppMatrixFrame(makeFrame(pixels))
         } catch (error: Exception) {
-            glyphStatus.value = "НЕ УДАЛОСЬ ОТПРАВИТЬ РИСУНОК"
+            glyphStatus.value = "НЕ УДАЛОСЬ ОБНОВИТЬ GLYPH MATRIX"
         }
     }
 
@@ -138,6 +155,7 @@ class MainActivity : ComponentActivity() {
 private fun GlyphLabEditor(
     glyphStatus: String,
     onShowOnGlyph: (List<Boolean>) -> Unit,
+    onUpdateGlyph: (List<Boolean>) -> Unit,
     onTurnOffGlyph: () -> Unit
 ) {
     val pixels = remember {
@@ -145,9 +163,17 @@ private fun GlyphLabEditor(
             repeat(MATRIX_CELLS) { add(false) }
         }
     }
+    val glyphVisible = remember { mutableStateOf(false) }
 
-    // Match the circular physical panel: square LEDs are kept only when
-    // their complete square footprint fits inside the round boundary.
+    // While the eye is enabled, every edit is immediately mirrored to the physical matrix.
+    LaunchedEffect(glyphVisible.value) {
+        if (glyphVisible.value) {
+            snapshotFlow { pixels.toList() }.drop(1).collect { editedPixels ->
+                onUpdateGlyph(editedPixels)
+            }
+        }
+    }
+
     val visiblePixelIndices = remember {
         buildList {
             val center = MATRIX_SIZE / 2f
@@ -173,14 +199,18 @@ private fun GlyphLabEditor(
 
     fun pixelIndex(position: Offset, width: Float): Int? {
         if (width <= 0f) return null
-        val center = width / 2f
-        val cell = width / MATRIX_SIZE
-        val column = floor(position.x / cell).toInt()
-        val row = floor(position.y / cell).toInt()
+        val gridSide = width * GRID_SCALE
+        val gridStart = (width - gridSide) / 2f
+        val localX = position.x - gridStart
+        val localY = position.y - gridStart
+        if (localX < 0f || localY < 0f || localX >= gridSide || localY >= gridSide) return null
+        val cell = gridSide / MATRIX_SIZE
+        val column = floor(localX / cell).toInt()
+        val row = floor(localY / cell).toInt()
         if (column !in 0 until MATRIX_SIZE || row !in 0 until MATRIX_SIZE) return null
-        val dx = position.x - center
-        val dy = position.y - center
-        if (dx * dx + dy * dy > center * center) return null
+        val dx = localX - gridSide / 2f
+        val dy = localY - gridSide / 2f
+        if (dx * dx + dy * dy > (gridSide / 2f) * (gridSide / 2f)) return null
         val index = row * MATRIX_SIZE + column
         return index.takeIf { visibleMask[it] }
     }
@@ -216,39 +246,49 @@ private fun GlyphLabEditor(
                         }
                     }
                     .pointerInput(Unit) {
+                        var eraseMode = false
                         detectDragGestures(
                             onDragStart = { offset ->
-                                pixelIndex(offset, size.width.toFloat())?.let { pixels[it] = true }
+                                val index = pixelIndex(offset, size.width.toFloat())
+                                if (index != null) {
+                                    eraseMode = pixels[index]
+                                    pixels[index] = !eraseMode
+                                }
                             },
                             onDrag = { change, _ ->
-                                pixelIndex(change.position, size.width.toFloat())?.let { pixels[it] = true }
+                                pixelIndex(change.position, size.width.toFloat())?.let { index ->
+                                    pixels[index] = !eraseMode
+                                }
                                 change.consume()
                             }
                         )
                     }
             ) {
-                val cell = size.width / MATRIX_SIZE
+                val panelCenter = size.width / 2f
+                val panelRadius = panelCenter - 1.5.dp.toPx()
+                val gridSide = size.width * GRID_SCALE
+                val gridStart = (size.width - gridSide) / 2f
+                val cell = gridSide / MATRIX_SIZE
                 val pixelSize = cell * 0.72f
-                val center = size.width / 2f
-                val radius = center - 1.5.dp.toPx()
 
+                // Larger circular rim around the inset 25x25 square LED layout.
                 drawCircle(
                     color = Color(0xFF171719),
-                    radius = radius,
-                    center = Offset(center, center)
+                    radius = panelRadius,
+                    center = Offset(panelCenter, panelCenter)
                 )
                 drawCircle(
-                    color = Color(0xFF39393D),
-                    radius = radius,
-                    center = Offset(center, center),
-                    style = Stroke(width = 1.2.dp.toPx())
+                    color = Color(0xFF45454A),
+                    radius = panelRadius,
+                    center = Offset(panelCenter, panelCenter),
+                    style = Stroke(width = 2.dp.toPx())
                 )
 
                 for (index in visiblePixelIndices) {
                     val row = index / MATRIX_SIZE
                     val column = index % MATRIX_SIZE
-                    val x = (column + 0.5f) * cell
-                    val y = (row + 0.5f) * cell
+                    val x = gridStart + (column + 0.5f) * cell
+                    val y = gridStart + (row + 0.5f) * cell
                     drawRect(
                         color = if (pixels[index]) Color.White else Color(0xFF050506),
                         topLeft = Offset(x - pixelSize / 2f, y - pixelSize / 2f),
@@ -269,7 +309,9 @@ private fun GlyphLabEditor(
                     fontSize = 12.sp,
                     letterSpacing = 1.sp
                 )
-                Button(onClick = { for (i in pixels.indices) pixels[i] = false }) {
+                Button(onClick = {
+                    for (i in pixels.indices) pixels[i] = false
+                }) {
                     Text("CLEAR")
                 }
             }
@@ -281,23 +323,22 @@ private fun GlyphLabEditor(
                 letterSpacing = 0.7.sp
             )
             Spacer(Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            IconButton(
+                onClick = {
+                    val nextVisible = !glyphVisible.value
+                    glyphVisible.value = nextVisible
+                    if (nextVisible) onShowOnGlyph(pixels.toList()) else onTurnOffGlyph()
+                }
             ) {
-                Button(
-                    modifier = Modifier.weight(1f),
-                    onClick = { onShowOnGlyph(pixels.toList()) }
-                ) {
-                    Text("ПОКАЗАТЬ НА GLYPH")
-                }
-                Button(onClick = onTurnOffGlyph) {
-                    Text("ВЫКЛ.")
-                }
+                Icon(
+                    imageVector = if (glyphVisible.value) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                    contentDescription = if (glyphVisible.value) "Скрыть Glyph Matrix" else "Показать на Glyph Matrix",
+                    tint = if (glyphVisible.value) Color.White else Color(0xFF888888)
+                )
             }
             Spacer(Modifier.weight(1f))
             Text(
-                "TAP TO TOGGLE  ·  DRAG TO DRAW",
+                "TAP TO TOGGLE  ·  DRAG TO DRAW / ERASE",
                 color = Color(0xFF666666),
                 fontSize = 10.sp,
                 letterSpacing = 1.sp
