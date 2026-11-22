@@ -149,7 +149,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class EditorMode(val title: String) {
+private data class HistoryEntry(val layerKey: Int, val pixels: List<Boolean>, val groups: List<List<Int>>)\n\nprivate enum class EditorMode(val title: String) {
     DRAW("Рисунки"), ANIMATION("Анимации"), TOYS("Glyph Toys")
 }
 
@@ -161,6 +161,7 @@ private fun GlyphLabEditor(
     onTurnOffGlyph: () -> Unit
 ) {
     val pixels = remember { mutableStateListOf<Boolean>().apply { repeat(MATRIX_CELLS) { add(false) } } }
+    val toyPixels = remember { mutableStateListOf<Boolean>().apply { repeat(MATRIX_CELLS) { add(false) } } }
     val glyphVisible = remember { mutableStateOf(false) }
     var mode by remember { mutableStateOf(EditorMode.DRAW) }
     var prompt by remember { mutableStateOf("") }
@@ -169,8 +170,8 @@ private fun GlyphLabEditor(
     var frameSpeed by remember { mutableFloatStateOf(1f) }
     var opacity by remember { mutableFloatStateOf(1f) }
     var progress by remember { mutableIntStateOf(0) }
-    val history = remember { mutableStateListOf<List<Boolean>>() }
-    val redoHistory = remember { mutableStateListOf<List<Boolean>>() }
+    val history = remember { mutableStateListOf<HistoryEntry>() }
+    val redoHistory = remember { mutableStateListOf<HistoryEntry>() }
     val animatedLetter = remember { mutableStateOf('A') }
     val animationFrames = remember {
         mutableStateListOf<SnapshotStateList<Boolean>>(
@@ -179,7 +180,18 @@ private fun GlyphLabEditor(
     }
     var selectedFrame by remember { mutableIntStateOf(0) }
     var isPlaying by remember { mutableStateOf(false) }
-    val activePixels = if (mode == EditorMode.ANIMATION) animationFrames[selectedFrame] else pixels
+    val activePixels = when (mode) {
+        EditorMode.DRAW -> pixels
+        EditorMode.ANIMATION -> animationFrames[selectedFrame]
+        EditorMode.TOYS -> toyPixels
+    }
+    val strokeGroups = remember { mutableStateMapOf<Int, List<List<Int>>>() }
+    val layerKey = when (mode) {
+        EditorMode.DRAW -> -1
+        EditorMode.ANIMATION -> selectedFrame
+        EditorMode.TOYS -> -2
+    }
+    var activeEraseGroup by remember { mutableStateOf<List<Int>?>(null) }
 
     LaunchedEffect(glyphVisible.value, mode, selectedFrame) {
         if (glyphVisible.value) {
@@ -202,9 +214,13 @@ private fun GlyphLabEditor(
         if (generating) {
             generationFinished = false
             progress = 0
-            val alphabet = "AEFHILOPST"
+            val alphabet = "AEFHILOPSTАБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ"
             repeat(100) { step ->
-                if (step % 25 == 0) animatedLetter.value = alphabet[Random.nextInt(alphabet.length)]
+                if (step % 25 == 0) {
+                    var next = alphabet[Random.nextInt(alphabet.length)]
+                    if (alphabet.length > 1 && next == animatedLetter.value) next = alphabet[(alphabet.indexOf(next) + 1) % alphabet.length]
+                    animatedLetter.value = next
+                }
                 progress = step + 1
                 delay(100)
             }
@@ -213,29 +229,49 @@ private fun GlyphLabEditor(
         }
     }
 
-    fun saveHistory() {
-        history.add(activePixels.toList())
-        if (history.size > 40) history.removeAt(0)
+    fun layerPixels(key: Int): SnapshotStateList<Boolean> = when {
+        key == -1 -> pixels
+        key == -2 -> toyPixels
+        else -> animationFrames[key.coerceIn(0, animationFrames.lastIndex)]
+    }
+    fun saveHistory(key: Int = layerKey) {
+        history.add(HistoryEntry(key, layerPixels(key).toList(), strokeGroups[key].orEmpty().map { it.toList() }))
+        if (history.size > 60) history.removeAt(0)
         redoHistory.clear()
     }
-    val strokeGroups = remember { mutableStateMapOf<Int, List<List<Int>>>() }
-    val layerKey = if (mode == EditorMode.ANIMATION) selectedFrame else -1
-    fun applyStroke(indices: List<Int>, erase: Boolean) {
-        if (indices.isEmpty()) return
-        saveHistory()
-        val groups = strokeGroups[layerKey]?.toMutableList() ?: mutableListOf()
+    fun restoreHistory(entry: HistoryEntry) {
+        val target = layerPixels(entry.layerKey)
+        entry.pixels.forEachIndexed { index, value -> target[index] = value }
+        strokeGroups[entry.layerKey] = entry.groups.map { it.toList() }
+    }
+    fun beginStroke(index: Int): Boolean {
+        saveHistory(layerKey)
+        val erase = activePixels[index]
+        activeEraseGroup = if (erase) strokeGroups[layerKey].orEmpty().lastOrNull { index in it } else null
+        return erase
+    }
+    fun updateStroke(indices: List<Int>, erase: Boolean) {
         if (erase) {
-            val hit = groups.indexOfLast { group -> group.any { it in indices } }
-            if (hit >= 0) {
-                groups.removeAt(hit).forEach { activePixels[it] = false }
-            } else {
-                indices.forEach { activePixels[it] = false }
-            }
+            val target = activeEraseGroup ?: indices
+            target.forEach { if (it in activePixels.indices) activePixels[it] = false }
         } else {
-            indices.forEach { activePixels[it] = true }
+            indices.forEach { if (it in activePixels.indices) activePixels[it] = true }
+        }
+    }
+    fun finishStroke(indices: List<Int>, erase: Boolean) {
+        val groups = strokeGroups[layerKey].orEmpty().toMutableList()
+        if (erase) {
+            activeEraseGroup?.let { removed -> groups.removeAll { it == removed } }
+        } else if (indices.isNotEmpty()) {
             groups.add(indices.distinct())
         }
         strokeGroups[layerKey] = groups
+        activeEraseGroup = null
+    }
+    fun applyTap(index: Int) {
+        val erase = beginStroke(index)
+        updateStroke(listOf(index), erase)
+        finishStroke(listOf(index), erase)
     }
     fun pixelIndex(position: Offset, width: Float): Int? {
         if (width <= 0f) return null
@@ -281,18 +317,25 @@ private fun GlyphLabEditor(
                 Text("GLYPH MATRIX  ·  25 × 25", color = Muted, fontSize = 10.sp, letterSpacing = 1.3.sp)
                 Row {
                     IconButton(enabled = history.isNotEmpty(), onClick = {
-                        redoHistory.add(activePixels.toList())
-                        history.removeAt(history.lastIndex).forEachIndexed { i, v -> activePixels[i] = v }
+                        val entry = history.removeAt(history.lastIndex)
+                        val target = layerPixels(entry.layerKey)
+                        redoHistory.add(HistoryEntry(entry.layerKey, target.toList(), strokeGroups[entry.layerKey].orEmpty().map { it.toList() }))
+                        restoreHistory(entry)
                     }) { Icon(Icons.Default.Undo, "Undo", tint = if (history.isNotEmpty()) Color.White else Muted) }
                     IconButton(enabled = redoHistory.isNotEmpty(), onClick = {
-                        history.add(activePixels.toList())
-                        redoHistory.removeAt(redoHistory.lastIndex).forEachIndexed { i, v -> activePixels[i] = v }
+                        val entry = redoHistory.removeAt(redoHistory.lastIndex)
+                        val target = layerPixels(entry.layerKey)
+                        history.add(HistoryEntry(entry.layerKey, target.toList(), strokeGroups[entry.layerKey].orEmpty().map { it.toList() }))
+                        restoreHistory(entry)
                     }) { Icon(Icons.Default.Redo, "Redo", tint = if (redoHistory.isNotEmpty()) Color.White else Muted) }
                 }
             }
             MatrixPreview(
                 activePixels,
-                onStroke = { indices, erase -> applyStroke(indices, erase) },
+                onTap = ::applyTap,
+                onStrokeStart = ::beginStroke,
+                onStrokeUpdate = ::updateStroke,
+                onStrokeEnd = ::finishStroke,
                 pixelIndex = ::pixelIndex
             )
             Spacer(Modifier.height(8.dp))
@@ -400,7 +443,7 @@ private fun GlyphLabEditor(
                     }
                     Spacer(Modifier.height(4.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { if (mode == EditorMode.DRAW) saveHistory(); activePixels.indices.forEach { activePixels[it] = false } }, modifier = Modifier.weight(1f)) {
+                        OutlinedButton(onClick = { saveHistory(layerKey); activePixels.indices.forEach { activePixels[it] = false }; strokeGroups[layerKey] = emptyList() }, modifier = Modifier.weight(1f)) {
                             Icon(Icons.Default.Delete, null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("Очистить")
                         }
                         Button(onClick = {}, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Accent)) {
@@ -467,18 +510,19 @@ private fun GlyphLabEditor(
 @Composable
 private fun MatrixPreview(
     pixels: SnapshotStateList<Boolean>,
-    onStroke: (List<Int>, Boolean) -> Unit,
+    onTap: (Int) -> Unit,
+    onStrokeStart: (Int) -> Boolean,
+    onStrokeUpdate: (List<Int>, Boolean) -> Unit,
+    onStrokeEnd: (List<Int>, Boolean) -> Unit,
     pixelIndex: (Offset, Float) -> Int?
 ) {
     Canvas(Modifier.fillMaxWidth().aspectRatio(1f)
-        .pointerInput(pixels) {
+        .pointerInput(Unit) {
             detectTapGestures { pos ->
-                pixelIndex(pos, size.width.toFloat())?.let { index ->
-                    onStroke(listOf(index), pixels[index])
-                }
+                pixelIndex(pos, size.width.toFloat())?.let(onTap)
             }
         }
-        .pointerInput(pixels) {
+        .pointerInput(Unit) {
             var eraseMode = false
             var lastIndex = -1
             val visited = linkedSetOf<Int>()
@@ -493,28 +537,29 @@ private fun MatrixPreview(
                 for (step in 0..steps) {
                     val x = (x0 + (x1 - x0) * (step.toFloat() / steps)).toInt()
                     val y = (y0 + (y1 - y0) * (step.toFloat() / steps)).toInt()
-                    val index = y * MATRIX_SIZE + x
-                    visited.add(index)
+                    visited.add(y * MATRIX_SIZE + x)
                 }
             }
             detectDragGestures(onDragStart = { pos ->
                 visited.clear()
                 lastIndex = pixelIndex(pos, size.width.toFloat()) ?: -1
                 if (lastIndex >= 0) {
-                    eraseMode = pixels[lastIndex]
+                    eraseMode = onStrokeStart(lastIndex)
                     visited.add(lastIndex)
+                    onStrokeUpdate(visited.toList(), eraseMode)
                 }
             }, onDrag = { change, _ ->
                 val index = pixelIndex(change.position, size.width.toFloat())
                 if (index != null && lastIndex >= 0 && index != lastIndex) {
                     addLine(lastIndex, index)
                     lastIndex = index
+                    onStrokeUpdate(visited.toList(), eraseMode)
                 }
                 change.consume()
             }, onDragEnd = {
-                if (visited.isNotEmpty()) onStroke(visited.toList(), eraseMode)
+                if (visited.isNotEmpty()) onStrokeEnd(visited.toList(), eraseMode)
             }, onDragCancel = {
-                if (visited.isNotEmpty()) onStroke(visited.toList(), eraseMode)
+                if (visited.isNotEmpty()) onStrokeEnd(visited.toList(), eraseMode)
             })
         }
     ) {
@@ -541,11 +586,11 @@ private fun MatrixPreview(
 
 @Composable
 private fun GenerationAnimation(letter: Char, progress: Int) {
-    Column(Modifier.fillMaxWidth().background(Color(0xFF080809), RoundedCornerShape(16.dp)).padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalAlignment = Alignment.Start) {
         Text("Г Е Н Е Р А Ц И Я", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(8.dp))
         PixelLetter(letter)
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(8.dp))
         LinearProgressIndicator(progress = { progress / 100f }, modifier = Modifier.fillMaxWidth().height(3.dp), color = Accent, trackColor = Color(0xFF303034))
         Spacer(Modifier.height(7.dp))
         Text("ОБРАБОТКА ЗАПРОСА  $progress%", color = Muted, fontSize = 9.sp, letterSpacing = 1.sp)
@@ -566,13 +611,7 @@ private fun PixelLetter(character: Char) {
         'S' -> listOf("01111", "10000", "10000", "01110", "00001", "00001", "11110")
         else -> listOf("11111", "00100", "00100", "00100", "00100", "00100", "00100")
     }
-    Box(
-        Modifier.size(width = 74.dp, height = 82.dp)
-            .background(Color(0xFF101012), RoundedCornerShape(7.dp))
-            .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(7.dp)),
-        contentAlignment = Alignment.Center
-    ) {
-        Canvas(Modifier.size(width = 54.dp, height = 70.dp).offset(x = (-5).dp, y = (-5).dp)) {
+    Canvas(Modifier.padding(start = 12.dp).size(width = 58.dp, height = 72.dp)) {
             val cell = size.minDimension / 8f
             val pixel = cell * 0.82f
             glyph.forEachIndexed { row, bits ->
@@ -598,6 +637,5 @@ private fun PixelLetter(character: Char) {
                     }
                 }
             }
-        }
     }
 }
