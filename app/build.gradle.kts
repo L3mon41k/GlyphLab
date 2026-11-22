@@ -32,6 +32,7 @@ android {
 
 dependencies {
     implementation(files("libs/glyph-matrix-sdk-2.0.aar"))
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.16.0")
     implementation(platform("androidx.compose:compose-bom:2025.06.01"))
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation("androidx.compose.ui:ui")
