@@ -2,7 +2,7 @@ name: Build GlyphLab APK
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, glyphlab-0.3.0 ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -43,5 +43,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: GlyphLab-0.2.1-debug
+          name: GlyphLab-0.3.0-debug
           path: app/build/outputs/apk/debug/app-debug.apk
