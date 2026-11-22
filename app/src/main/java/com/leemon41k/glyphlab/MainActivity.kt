@@ -58,7 +58,22 @@ private fun GlyphLabEditor() {
     val pixels = remember { mutableStateListOf<Boolean>().apply {
         repeat(MATRIX_SIZE * MATRIX_SIZE) { add(false) }
     } }
-    val litCount = pixels.count { it }
+    val visiblePixelIndices = remember {
+        buildList {
+            val center = MATRIX_SIZE / 2f
+            val maxDistance = center - 0.36f
+            for (row in 0 until MATRIX_SIZE) {
+                for (column in 0 until MATRIX_SIZE) {
+                    val dx = column + 0.5f - center
+                    val dy = row + 0.5f - center
+                    if (dx * dx + dy * dy <= maxDistance * maxDistance) {
+                        add(row * MATRIX_SIZE + column)
+                    }
+                }
+            }
+        }
+    }
+    val litCount = visiblePixelIndices.count { pixels[it] }
 
     fun isInsideMatrix(position: Offset, width: Float): Boolean {
         val center = width / 2f
@@ -171,7 +186,7 @@ private fun GlyphLabEditor() {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "$litCount / 625 PIXELS",
+                    text = "$litCount / ${visiblePixelIndices.size} PIXELS",
                     color = Color(0xFFAAAAAA),
                     fontSize = 12.sp,
                     letterSpacing = 1.sp
