@@ -1,5 +1,7 @@
 package com.leemon41k.glyphlab
 
+import android.app.ActivityManager
+import android.app.ApplicationExitInfo
 import android.content.ComponentName
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -73,12 +75,14 @@ class MainActivity : ComponentActivity() {
     private val modelProgress = mutableStateOf(ModelDownloadProgress())
     private val modelError = mutableStateOf<String?>(null)
     private val modelReady = mutableStateOf(false)
+    private val previousCrashReport = mutableStateOf<String?>(null)
     private var qwenEngine: Engine? = null
     private var qwenConversation: Conversation? = null
     private var glyphReady = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        previousCrashReport.value = readPreviousCrashReport()
         connectGlyphMatrix()
         setContent {
             MaterialTheme(
@@ -88,26 +92,71 @@ class MainActivity : ComponentActivity() {
                     onSurface = Color.White, secondary = Accent
                 )
             ) {
-                if (modelReady.value) {
-                    GlyphLabEditor(
-                        glyphStatus = glyphStatus.value,
-                        onShowOnGlyph = { showOnGlyph(it) },
-                        onUpdateGlyph = { updateGlyphFrame(it) },
-                        onTurnOffGlyph = { turnOffGlyph() },
-                        onGenerate = { prompt, onText, onComplete ->
-                            generateWithQwen(prompt, onText, onComplete)
-                        }
-                    )
-                } else {
-                    ModelSetupScreen(
-                        progress = modelProgress.value,
-                        error = modelError.value,
-                        onRetry = { startModelSetup() }
-                    )
+                Box(Modifier.fillMaxSize()) {
+                    if (modelReady.value) {
+                        GlyphLabEditor(
+                            glyphStatus = glyphStatus.value,
+                            onShowOnGlyph = { showOnGlyph(it) },
+                            onUpdateGlyph = { updateGlyphFrame(it) },
+                            onTurnOffGlyph = { turnOffGlyph() },
+                            onGenerate = { prompt, onText, onComplete ->
+                                generateWithQwen(prompt, onText, onComplete)
+                            }
+                        )
+                    } else {
+                        ModelSetupScreen(
+                            progress = modelProgress.value,
+                            error = modelError.value,
+                            onRetry = { startModelSetup() }
+                        )
+                    }
+                    previousCrashReport.value?.let { report ->
+                        AlertDialog(
+                            onDismissRequest = { previousCrashReport.value = null },
+                            title = { Text("ДИАГНОСТИКА ПРЕДЫДУЩЕГО ЗАПУСКА") },
+                            text = { Text(report) },
+                            confirmButton = {
+                                TextButton(onClick = { previousCrashReport.value = null }) {
+                                    Text("ПОНЯТНО")
+                                }
+                            }
+                        )
+                    }
                 }
             }
         }
         startModelSetup()
+    }
+
+    private fun readPreviousCrashReport(): String? {
+        val activityManager = getSystemService(ActivityManager::class.java) ?: return null
+        val preferences = getSharedPreferences("glyphlab_diagnostics", MODE_PRIVATE)
+        val lastReported = preferences.getLong("last_reported_exit", 0L)
+        val exit = activityManager.getHistoricalProcessExitReasons(packageName, 0, 8)
+            .firstOrNull { info ->
+                info.timestamp > lastReported && info.reason in setOf(
+                    ApplicationExitInfo.REASON_CRASH,
+                    ApplicationExitInfo.REASON_CRASH_NATIVE,
+                    ApplicationExitInfo.REASON_LOW_MEMORY,
+                    ApplicationExitInfo.REASON_SIGNALED,
+                    ApplicationExitInfo.REASON_ANR,
+                    ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE
+                )
+            } ?: return null
+
+        preferences.edit().putLong("last_reported_exit", exit.timestamp).apply()
+        val reason = when (exit.reason) {
+            ApplicationExitInfo.REASON_CRASH -> "Ошибка Java/Kotlin (необработанное исключение)."
+            ApplicationExitInfo.REASON_CRASH_NATIVE -> "Аварийное завершение нативного кода. Возможен сбой LiteRT-LM."
+            ApplicationExitInfo.REASON_LOW_MEMORY -> "Android завершил приложение из-за нехватки оперативной памяти."
+            ApplicationExitInfo.REASON_SIGNALED -> "Процесс завершён системным сигналом (код undefined)."
+            ApplicationExitInfo.REASON_ANR -> "Приложение перестало отвечать системе."
+            ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE -> "Android завершил приложение из-за чрезмерного расхода ресурсов."
+            else -> "Неизвестная причина."
+        }
+        val memory = if (exit.rss > 0) "\nПамять процесса перед завершением: NaN МБ." else ""
+        val details = exit.description?.takeIf { it.isNotBlank() }?.let { "\nСведения Android: $it" } ?: ""
+        return "$reason$memory$details"
     }
 
     private fun startModelSetup() {
@@ -125,7 +174,8 @@ class MainActivity : ComponentActivity() {
                         EngineConfig(
                             modelPath = modelFile.absolutePath,
                             backend = Backend.CPU(),
-                            cacheDir = cacheDir.absolutePath
+                            cacheDir = cacheDir.absolutePath,
+                            maxNumTokens = 1024
                         )
                     ).apply { initialize() }
                 }
@@ -133,7 +183,8 @@ class MainActivity : ComponentActivity() {
                     engine.createConversation(
                         ConversationConfig(
                             systemInstruction = Contents.of(GlyphKnowledgeBase.systemInstruction),
-                            samplerConfig = SamplerConfig(temperature = 0.25, topK = 24, topP = 0.9)
+                            samplerConfig = SamplerConfig(temperature = 0.25, topK = 24, topP = 0.9),
+                            maxOutputToken = 128
                         )
                     )
                 }
