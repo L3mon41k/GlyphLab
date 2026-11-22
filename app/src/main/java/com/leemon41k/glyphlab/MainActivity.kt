@@ -204,7 +204,7 @@ private fun GlyphLabEditor(
             progress = 0
             val alphabet = "AEFHILOPST"
             repeat(100) { step ->
-                if (step % 9 == 0) animatedLetter.value = alphabet[Random.nextInt(alphabet.length)]
+                if (step % 25 == 0) animatedLetter.value = alphabet[Random.nextInt(alphabet.length)]
                 progress = step + 1
                 delay(100)
             }
@@ -214,9 +214,28 @@ private fun GlyphLabEditor(
     }
 
     fun saveHistory() {
-        history.add(pixels.toList())
+        history.add(activePixels.toList())
         if (history.size > 40) history.removeAt(0)
         redoHistory.clear()
+    }
+    val strokeGroups = remember { mutableStateMapOf<Int, List<List<Int>>>() }
+    val layerKey = if (mode == EditorMode.ANIMATION) selectedFrame else -1
+    fun applyStroke(indices: List<Int>, erase: Boolean) {
+        if (indices.isEmpty()) return
+        saveHistory()
+        val groups = strokeGroups[layerKey]?.toMutableList() ?: mutableListOf()
+        if (erase) {
+            val hit = groups.indexOfLast { group -> group.any { it in indices } }
+            if (hit >= 0) {
+                groups.removeAt(hit).forEach { activePixels[it] = false }
+            } else {
+                indices.forEach { activePixels[it] = false }
+            }
+        } else {
+            indices.forEach { activePixels[it] = true }
+            groups.add(indices.distinct())
+        }
+        strokeGroups[layerKey] = groups
     }
     fun pixelIndex(position: Offset, width: Float): Int? {
         if (width <= 0f) return null
@@ -262,19 +281,21 @@ private fun GlyphLabEditor(
                 Text("GLYPH MATRIX  ·  25 × 25", color = Muted, fontSize = 10.sp, letterSpacing = 1.3.sp)
                 Row {
                     IconButton(enabled = history.isNotEmpty(), onClick = {
-                        redoHistory.add(pixels.toList())
-                        history.removeAt(history.lastIndex).forEachIndexed { i, v -> pixels[i] = v }
+                        redoHistory.add(activePixels.toList())
+                        history.removeAt(history.lastIndex).forEachIndexed { i, v -> activePixels[i] = v }
                     }) { Icon(Icons.Default.Undo, "Undo", tint = if (history.isNotEmpty()) Color.White else Muted) }
                     IconButton(enabled = redoHistory.isNotEmpty(), onClick = {
-                        history.add(pixels.toList())
-                        redoHistory.removeAt(redoHistory.lastIndex).forEachIndexed { i, v -> pixels[i] = v }
+                        history.add(activePixels.toList())
+                        redoHistory.removeAt(redoHistory.lastIndex).forEachIndexed { i, v -> activePixels[i] = v }
                     }) { Icon(Icons.Default.Redo, "Redo", tint = if (redoHistory.isNotEmpty()) Color.White else Muted) }
                 }
             }
-            MatrixPreview(activePixels, { index ->
-                if (mode == EditorMode.DRAW) saveHistory()
-                activePixels[index] = !activePixels[index]
-            }, ::pixelIndex)
+            MatrixPreview(
+                activePixels,
+                onPixel = { index -> applyStroke(listOf(index), activePixels[index]) },
+                onStroke = { indices, erase -> applyStroke(indices, erase) },
+                pixelIndex = ::pixelIndex
+            )
             Spacer(Modifier.height(8.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("$litCount / 489 PIXELS", color = Muted, fontSize = 10.sp, letterSpacing = 1.sp)
@@ -445,24 +466,59 @@ private fun GlyphLabEditor(
 }
 
 @Composable
-private fun MatrixPreview(pixels: SnapshotStateList<Boolean>, onPixel: (Int) -> Unit, pixelIndex: (Offset, Float) -> Int?) {
+private fun MatrixPreview(
+    pixels: SnapshotStateList<Boolean>,
+    onPixel: (Int) -> Unit,
+    onStroke: (List<Int>, Boolean) -> Unit,
+    pixelIndex: (Offset, Float) -> Int?
+) {
     Canvas(Modifier.fillMaxWidth().aspectRatio(1f)
-        .pointerInput(Unit) {
-            detectTapGestures { pos -> pixelIndex(pos, size.width.toFloat())?.let(onPixel) }
+        .pointerInput(pixels) {
+            detectTapGestures { pos ->
+                pixelIndex(pos, size.width.toFloat())?.let { index ->
+                    onStroke(listOf(index), pixels[index])
+                    onPixel(index)
+                }
+            }
         }
-        .pointerInput(Unit) {
+        .pointerInput(pixels) {
             var eraseMode = false
             var lastIndex = -1
+            val visited = linkedSetOf<Int>()
+            fun addLine(from: Int, to: Int) {
+                val x0 = from % MATRIX_SIZE
+                val y0 = from / MATRIX_SIZE
+                val x1 = to % MATRIX_SIZE
+                val y1 = to / MATRIX_SIZE
+                val dx = kotlin.math.abs(x1 - x0)
+                val dy = kotlin.math.abs(y1 - y0)
+                val steps = maxOf(dx, dy, 1)
+                for (step in 0..steps) {
+                    val x = (x0 + (x1 - x0) * (step.toFloat() / steps)).toInt()
+                    val y = (y0 + (y1 - y0) * (step.toFloat() / steps)).toInt()
+                    val index = y * MATRIX_SIZE + x
+                    if (visited.add(index)) onPixel(index)
+                }
+            }
             detectDragGestures(onDragStart = { pos ->
+                visited.clear()
                 lastIndex = pixelIndex(pos, size.width.toFloat()) ?: -1
-                if (lastIndex >= 0) { eraseMode = pixels[lastIndex]; onPixel(lastIndex) }
+                if (lastIndex >= 0) {
+                    eraseMode = pixels[lastIndex]
+                    visited.add(lastIndex)
+                    onPixel(lastIndex)
+                }
             }, onDrag = { change, _ ->
                 val index = pixelIndex(change.position, size.width.toFloat())
-                if (index != null && index != lastIndex) {
+                if (index != null && lastIndex >= 0 && index != lastIndex) {
+                    addLine(lastIndex, index)
                     lastIndex = index
-                    if (pixels[index] == eraseMode) onPixel(index)
                 }
                 change.consume()
+            }, onDragEnd = {
+                if (visited.isNotEmpty()) onStroke(visited.toList(), eraseMode)
+            }, onDragCancel = {
+                if (visited.isNotEmpty()) onStroke(visited.toList(), eraseMode)
             })
         }
     ) {
@@ -529,9 +585,14 @@ private fun PixelLetter(character: Char) {
                         val x = (column + 1.5f) * cell - pixel / 2f
                         val y = (row + 0.5f) * cell - pixel / 2f
                         drawRect(
-                            color = Color.White.copy(alpha = 0.13f),
-                            topLeft = Offset(x - pixel * 0.55f, y - pixel * 0.55f),
-                            size = Size(pixel * 2.1f, pixel * 2.1f)
+                            color = Color.White.copy(alpha = 0.035f),
+                            topLeft = Offset(x - pixel * 1.35f, y - pixel * 1.35f),
+                            size = Size(pixel * 3.7f, pixel * 3.7f)
+                        )
+                        drawRect(
+                            color = Color.White.copy(alpha = 0.09f),
+                            topLeft = Offset(x - pixel * 0.85f, y - pixel * 0.85f),
+                            size = Size(pixel * 2.7f, pixel * 2.7f)
                         )
                         drawRect(
                             color = Color.White,
