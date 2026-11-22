@@ -185,7 +185,7 @@ private fun GlyphLabEditor(
         if (generating) {
             generationFinished = false
             progress = 0
-            val alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZАБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ0123456789"
+            val alphabet = "AEFHILOPST"
             repeat(100) { step ->
                 animatedLetter.value = alphabet[Random.nextInt(alphabet.length)]
                 progress = step + 1
@@ -473,18 +473,38 @@ private fun GenerationAnimation(letter: Char, progress: Int) {
 
 @Composable
 private fun PixelLetter(character: Char) {
+    val glyph = when (character) {
+        'A' -> listOf("01110", "10001", "10001", "11111", "10001", "10001", "10001")
+        'E' -> listOf("11111", "10000", "10000", "11110", "10000", "10000", "11111")
+        'F' -> listOf("11111", "10000", "10000", "11110", "10000", "10000", "10000")
+        'H' -> listOf("10001", "10001", "10001", "11111", "10001", "10001", "10001")
+        'I' -> listOf("11111", "00100", "00100", "00100", "00100", "00100", "11111")
+        'L' -> listOf("10000", "10000", "10000", "10000", "10000", "10000", "11111")
+        'O' -> listOf("01110", "10001", "10001", "10001", "10001", "10001", "01110")
+        'P' -> listOf("11110", "10001", "10001", "11110", "10000", "10000", "10000")
+        'S' -> listOf("01111", "10000", "10000", "01110", "00001", "00001", "11110")
+        else -> listOf("11111", "00100", "00100", "00100", "00100", "00100", "00100")
+    }
     Box(
-        Modifier.size(width = 42.dp, height = 58.dp)
-            .background(Color(0xFF101012), RoundedCornerShape(5.dp))
-            .border(1.dp, Accent.copy(alpha = 0.45f), RoundedCornerShape(5.dp)),
+        Modifier.size(width = 74.dp, height = 82.dp)
+            .background(Color(0xFF101012), RoundedCornerShape(7.dp))
+            .border(1.dp, Accent.copy(alpha = 0.45f), RoundedCornerShape(7.dp)),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            character.toString(),
-            color = Accent,
-            fontSize = 39.sp,
-            fontWeight = FontWeight.Black,
-            fontFamily = FontFamily.Monospace
-        )
+        Canvas(Modifier.size(width = 54.dp, height = 70.dp)) {
+            val cell = size.minDimension / 8f
+            val pixel = cell * 0.82f
+            glyph.forEachIndexed { row, bits ->
+                bits.forEachIndexed { column, bit ->
+                    if (bit == '1') {
+                        drawRect(
+                            color = Accent,
+                            topLeft = Offset((column + 1.5f) * cell - pixel / 2f, (row + 0.5f) * cell - pixel / 2f),
+                            size = Size(pixel, pixel)
+                        )
+                    }
+                }
+            }
+        }
     }
 }
