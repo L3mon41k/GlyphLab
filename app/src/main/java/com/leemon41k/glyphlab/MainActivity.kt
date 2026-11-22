@@ -16,8 +16,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -80,7 +78,9 @@ private fun GlyphLabEditor() {
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color.Black)
-                .padding(horizontal = 20.dp, vertical = 24.dp),
+                .padding(horizontal = 20.dp)
+                // Extra top space keeps the title clear of the front camera.
+                .padding(top = 68.dp, bottom = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
@@ -102,7 +102,7 @@ private fun GlyphLabEditor() {
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1f)
-                    .background(Color(0xFF080808), RoundedCornerShape(4.dp))
+                    .background(Color(0xFF080808))
                     .pointerInput(Unit) {
                         detectTapGestures { offset ->
                             pixelIndex(offset, size.width.toFloat())?.let { index ->
@@ -127,23 +127,19 @@ private fun GlyphLabEditor() {
                     }
             ) {
                 val cell = size.width / MATRIX_SIZE
-                val gap = cell * 0.12f
+                val radius = cell * 0.37f
+
                 for (row in 0 until MATRIX_SIZE) {
                     for (column in 0 until MATRIX_SIZE) {
                         val index = row * MATRIX_SIZE + column
-                        if (pixels[index]) {
-                            drawRect(
-                                color = Color.White,
-                                topLeft = Offset(
-                                    x = column * cell + gap / 2,
-                                    y = row * cell + gap / 2
-                                ),
-                                size = androidx.compose.ui.geometry.Size(
-                                    cell - gap,
-                                    cell - gap
-                                )
+                        drawCircle(
+                            color = if (pixels[index]) Color.White else Color(0xFF303030),
+                            radius = radius,
+                            center = Offset(
+                                x = (column + 0.5f) * cell,
+                                y = (row + 0.5f) * cell
                             )
-                        }
+                        )
                     }
                 }
             }
