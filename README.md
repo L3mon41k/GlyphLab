@@ -4,7 +4,7 @@ A lightweight editor for the 25×25 Glyph Matrix on Nothing Phone (3).
 
 ## Current version
 
-**0.2.0 — Circular editor and Glyph Matrix output**
+**0.2.1 — Live Glyph Matrix editing**
 
 - Circular 25×25 Glyph Matrix preview with square LEDs arranged inside the round boundary
 - Tap a pixel to toggle it on or off
@@ -12,7 +12,7 @@ A lightweight editor for the 25×25 Glyph Matrix on Nothing Phone (3).
 - Clear the canvas
 - Connect to Nothing Glyph Matrix through the official Glyph Matrix SDK
 - Send the current drawing to the phone's physical Glyph Matrix
-- Turn off the app's Glyph Matrix output
+- Toggle physical Glyph Matrix output with a single eye button\n- Live-sync edits and drag erasing while output is enabled
 - Connection and output status in the app
 
 The app uses the official setAppMatrixFrame() API so it does not directly replace the system's general Glyph Toy frame. The matrix output is one-way: the SDK exposes sending and closing the app display, but does not provide a public method to read back the physical LED state.
