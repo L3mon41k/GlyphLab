@@ -138,7 +138,7 @@ class MainActivity : ComponentActivity() {
                 val memory = "\n\nПАМЯТЬ: свободно ${(runtime.freeMemory() / 1024 / 1024)} МБ из ${(runtime.totalMemory() / 1024 / 1024)} МБ; максимум ${(runtime.maxMemory() / 1024 / 1024)} МБ."
                 val report = buildString {
                     appendLine("GLYPHLAB JAVA/KOTLIN CRASH")
-                    appendLine("Время: ${java.text.SimpleDateFormat(\"yyyy-MM-dd HH:mm:ss.SSS\", java.util.Locale.US).format(java.util.Date())}")
+                    appendLine("Время: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date())}")
                     appendLine("Поток: ${thread.name} (id=${thread.id})")
                     appendLine("Исключение: ${error.javaClass.name}: ${error.message}")
                     appendLine(memory)
