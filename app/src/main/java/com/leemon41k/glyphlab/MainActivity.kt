@@ -21,6 +21,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material.icons.filled.Visibility
@@ -176,10 +178,25 @@ private fun GlyphLabEditor(
         )
     }
     var selectedFrame by remember { mutableIntStateOf(0) }
+    var isPlaying by remember { mutableStateOf(false) }
     val activePixels = if (mode == EditorMode.ANIMATION) animationFrames[selectedFrame] else pixels
 
-    LaunchedEffect(glyphVisible.value) {
-        if (glyphVisible.value) snapshotFlow { pixels.toList() }.drop(1).collect { onUpdateGlyph(it) }
+    LaunchedEffect(glyphVisible.value, mode, selectedFrame) {
+        if (glyphVisible.value) {
+            onUpdateGlyph(activePixels.toList())
+            snapshotFlow { activePixels.toList() }.collect { onUpdateGlyph(it) }
+        }
+    }
+    LaunchedEffect(mode) {
+        if (mode != EditorMode.ANIMATION) isPlaying = false
+    }
+    LaunchedEffect(isPlaying, mode, frameSpeed, animationFrames.size) {
+        if (isPlaying && mode == EditorMode.ANIMATION && animationFrames.size > 1) {
+            while (true) {
+                delay((500f / frameSpeed.coerceAtLeast(0.2f)).toLong())
+                selectedFrame = (selectedFrame + 1) % animationFrames.size
+            }
+        }
     }
     LaunchedEffect(generating) {
         if (generating) {
@@ -187,7 +204,7 @@ private fun GlyphLabEditor(
             progress = 0
             val alphabet = "AEFHILOPST"
             repeat(100) { step ->
-                animatedLetter.value = alphabet[Random.nextInt(alphabet.length)]
+                if (step % 9 == 0) animatedLetter.value = alphabet[Random.nextInt(alphabet.length)]
                 progress = step + 1
                 delay(100)
             }
@@ -238,7 +255,7 @@ private fun GlyphLabEditor(
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = {
                     glyphVisible.value = !glyphVisible.value
-                    if (glyphVisible.value) onShowOnGlyph(pixels.toList()) else onTurnOffGlyph()
+                    if (glyphVisible.value) onShowOnGlyph(activePixels.toList()) else onTurnOffGlyph()
                 }) {
                     Icon(if (glyphVisible.value) Icons.Default.Visibility else Icons.Default.VisibilityOff, "Переключить вывод на Glyph Matrix", tint = if (glyphVisible.value) Accent else Muted)
                 }
@@ -281,6 +298,18 @@ private fun GlyphLabEditor(
                             Text("КАДРЫ АНИМАЦИИ", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
                             Spacer(Modifier.weight(1f))
                             Text("${animationFrames.size} КАДР.", color = Accent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.width(6.dp))
+                            IconButton(
+                                onClick = { isPlaying = !isPlaying },
+                                enabled = animationFrames.size > 1,
+                                modifier = Modifier.size(34.dp)
+                            ) {
+                                Icon(
+                                    if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                    contentDescription = if (isPlaying) "Пауза" else "Воспроизвести",
+                                    tint = if (animationFrames.size > 1) Accent else Muted
+                                )
+                            }
                         }
                         Spacer(Modifier.height(10.dp))
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -488,18 +517,25 @@ private fun PixelLetter(character: Char) {
     Box(
         Modifier.size(width = 74.dp, height = 82.dp)
             .background(Color(0xFF101012), RoundedCornerShape(7.dp))
-            .border(1.dp, Accent.copy(alpha = 0.45f), RoundedCornerShape(7.dp)),
+            .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(7.dp)),
         contentAlignment = Alignment.Center
     ) {
-        Canvas(Modifier.size(width = 54.dp, height = 70.dp)) {
+        Canvas(Modifier.size(width = 54.dp, height = 70.dp).offset(x = (-5).dp, y = (-5).dp)) {
             val cell = size.minDimension / 8f
             val pixel = cell * 0.82f
             glyph.forEachIndexed { row, bits ->
                 bits.forEachIndexed { column, bit ->
                     if (bit == '1') {
+                        val x = (column + 1.5f) * cell - pixel / 2f
+                        val y = (row + 0.5f) * cell - pixel / 2f
                         drawRect(
-                            color = Accent,
-                            topLeft = Offset((column + 1.5f) * cell - pixel / 2f, (row + 0.5f) * cell - pixel / 2f),
+                            color = Color.White.copy(alpha = 0.13f),
+                            topLeft = Offset(x - pixel * 0.55f, y - pixel * 0.55f),
+                            size = Size(pixel * 2.1f, pixel * 2.1f)
+                        )
+                        drawRect(
+                            color = Color.White,
+                            topLeft = Offset(x, y),
                             size = Size(pixel, pixel)
                         )
                     }
