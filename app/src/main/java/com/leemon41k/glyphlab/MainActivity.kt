@@ -42,13 +42,23 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.google.ai.edge.litertlm.Backend
+import com.google.ai.edge.litertlm.Contents
+import com.google.ai.edge.litertlm.Conversation
+import com.google.ai.edge.litertlm.ConversationConfig
+import com.google.ai.edge.litertlm.Engine
+import com.google.ai.edge.litertlm.EngineConfig
+import com.google.ai.edge.litertlm.SamplerConfig
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.nothing.ketchum.Glyph
 import com.nothing.ketchum.GlyphMatrixManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.drop
 import kotlin.math.floor
-import kotlin.random.Random
 
 private const val MATRIX_SIZE = 25
 private const val MATRIX_CELLS = MATRIX_SIZE * MATRIX_SIZE
@@ -60,6 +70,11 @@ private val Muted = Color(0xFF85858B)
 class MainActivity : ComponentActivity() {
     private var glyphManager: GlyphMatrixManager? = null
     private val glyphStatus = mutableStateOf("ПОДКЛЮЧЕНИЕ К GLYPH MATRIX…")
+    private val modelProgress = mutableStateOf(ModelDownloadProgress())
+    private val modelError = mutableStateOf<String?>(null)
+    private val modelReady = mutableStateOf(false)
+    private var qwenEngine: Engine? = null
+    private var qwenConversation: Conversation? = null
     private var glyphReady = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -73,12 +88,88 @@ class MainActivity : ComponentActivity() {
                     onSurface = Color.White, secondary = Accent
                 )
             ) {
-                GlyphLabEditor(
-                    glyphStatus = glyphStatus.value,
-                    onShowOnGlyph = { showOnGlyph(it) },
-                    onUpdateGlyph = { updateGlyphFrame(it) },
-                    onTurnOffGlyph = { turnOffGlyph() }
+                if (modelReady.value) {
+                    GlyphLabEditor(
+                        glyphStatus = glyphStatus.value,
+                        onShowOnGlyph = { showOnGlyph(it) },
+                        onUpdateGlyph = { updateGlyphFrame(it) },
+                        onTurnOffGlyph = { turnOffGlyph() },
+                        onGenerate = { prompt, onText, onComplete ->
+                            generateWithQwen(prompt, onText, onComplete)
+                        }
+                    )
+                } else {
+                    ModelSetupScreen(
+                        progress = modelProgress.value,
+                        error = modelError.value,
+                        onRetry = { startModelSetup() }
+                    )
+                }
+            }
+        }
+        startModelSetup()
+    }
+
+    private fun startModelSetup() {
+        modelError.value = null
+        lifecycleScope.launch {
+            try {
+                val modelFile = QwenModelInstaller.ensureInstalled(this@MainActivity) { progress ->
+                    withContext(Dispatchers.Main) { modelProgress.value = progress }
+                }
+                modelProgress.value = ModelDownloadProgress(
+                    modelFile.length(), modelFile.length(), stage = "ЗАПУСК НЕЙРОСЕТИ"
                 )
+                val engine = withContext(Dispatchers.IO) {
+                    Engine(
+                        EngineConfig(
+                            modelPath = modelFile.absolutePath,
+                            backend = Backend.CPU(),
+                            cacheDir = cacheDir.absolutePath
+                        )
+                    ).apply { initialize() }
+                }
+                val conversation = withContext(Dispatchers.IO) {
+                    engine.createConversation(
+                        ConversationConfig(
+                            systemInstruction = Contents.of(GlyphKnowledgeBase.systemInstruction),
+                            samplerConfig = SamplerConfig(temperature = 0.25, topK = 24, topP = 0.9)
+                        )
+                    )
+                }
+                qwenEngine = engine
+                qwenConversation = conversation
+                modelProgress.value = ModelDownloadProgress(
+                    modelFile.length(), modelFile.length(), stage = "GLYPH INTELLIGENCE ГОТОВ"
+                )
+                modelReady.value = true
+            } catch (error: Exception) {
+                modelError.value = error.localizedMessage ?: "Не удалось подготовить локальную нейросеть."
+            }
+        }
+    }
+
+    private fun generateWithQwen(
+        prompt: String,
+        onText: (String) -> Unit,
+        onComplete: (String?) -> Unit
+    ) {
+        val conversation = qwenConversation
+        if (conversation == null) {
+            onComplete("Нейросеть ещё не готова. Повторите подготовку модели.")
+            return
+        }
+        lifecycleScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    conversation.sendMessageAsync(prompt).collect { message ->
+                        val response = message.text
+                        withContext(Dispatchers.Main) { onText(response) }
+                    }
+                }
+                onComplete(null)
+            } catch (error: Exception) {
+                onComplete(error.localizedMessage ?: "Ошибка генерации.")
             }
         }
     }
@@ -145,6 +236,10 @@ class MainActivity : ComponentActivity() {
         } catch (_: Exception) {}
         glyphReady = false
         glyphManager = null
+        try { qwenConversation?.close() } catch (_: Exception) {}
+        try { qwenEngine?.close() } catch (_: Exception) {}
+        qwenConversation = null
+        qwenEngine = null
         super.onDestroy()
     }
 }
@@ -160,7 +255,8 @@ private fun GlyphLabEditor(
     glyphStatus: String,
     onShowOnGlyph: (List<Boolean>) -> Unit,
     onUpdateGlyph: (List<Boolean>) -> Unit,
-    onTurnOffGlyph: () -> Unit
+    onTurnOffGlyph: () -> Unit,
+    onGenerate: (String, (String) -> Unit, (String?) -> Unit) -> Unit
 ) {
     val pixels = remember { mutableStateListOf<Boolean>().apply { repeat(MATRIX_CELLS) { add(false) } } }
     val toyPixels = remember { mutableStateListOf<Boolean>().apply { repeat(MATRIX_CELLS) { add(false) } } }
@@ -168,13 +264,12 @@ private fun GlyphLabEditor(
     var mode by remember { mutableStateOf(EditorMode.DRAW) }
     var prompt by remember { mutableStateOf("") }
     var generating by remember { mutableStateOf(false) }
-    var generationFinished by remember { mutableStateOf(false) }
+    var aiResponse by remember { mutableStateOf("") }
+    var aiError by remember { mutableStateOf<String?>(null) }
     var frameSpeed by remember { mutableFloatStateOf(1f) }
     var opacity by remember { mutableFloatStateOf(1f) }
-    var progress by remember { mutableIntStateOf(0) }
     val history = remember { mutableStateListOf<HistoryEntry>() }
     val redoHistory = remember { mutableStateListOf<HistoryEntry>() }
-    val animatedLetter = remember { mutableStateOf('A') }
     val animationFrames = remember {
         mutableStateListOf<SnapshotStateList<Boolean>>(
             mutableStateListOf<Boolean>().apply { repeat(MATRIX_CELLS) { add(false) } }
@@ -212,25 +307,6 @@ private fun GlyphLabEditor(
             }
         }
     }
-    LaunchedEffect(generating) {
-        if (generating) {
-            generationFinished = false
-            progress = 0
-            val alphabet = "AEFHILOPSTАБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ"
-            repeat(100) { step ->
-                if (step % 25 == 0) {
-                    var next = alphabet[Random.nextInt(alphabet.length)]
-                    if (alphabet.length > 1 && next == animatedLetter.value) next = alphabet[(alphabet.indexOf(next) + 1) % alphabet.length]
-                    animatedLetter.value = next
-                }
-                progress = step + 1
-                delay(100)
-            }
-            generating = false
-            generationFinished = true
-        }
-    }
-
     fun layerPixels(key: Int): SnapshotStateList<Boolean> = when {
         key == -1 -> pixels
         key == -2 -> toyPixels
@@ -471,15 +547,23 @@ private fun GlyphLabEditor(
                     }
                     Spacer(Modifier.height(14.dp))
                     if (generating) {
-                        GenerationAnimation(animatedLetter.value, progress)
-                    } else if (generationFinished) {
-                        Row(Modifier.fillMaxWidth().background(Color(0xFF1D1718), RoundedCornerShape(14.dp)).padding(13.dp), verticalAlignment = Alignment.Top) {
-                            Icon(Icons.Default.Close, null, tint = Accent, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("Glyph Intelligence пока не подключён. Подключение нейросети и генерация станут доступны в одном из следующих обновлений.", color = Color(0xFFE4D6D7), fontSize = 12.sp, lineHeight = 18.sp)
+                        Column(Modifier.fillMaxWidth().background(Color(0xFF171719), RoundedCornerShape(14.dp)).padding(13.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(Modifier.size(16.dp), color = Accent, strokeWidth = 2.dp)
+                                Spacer(Modifier.width(9.dp))
+                                Text("QWEN3 ОБРАБАТЫВАЕТ ЗАПРОС", color = Accent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                            if (aiResponse.isNotBlank()) {
+                                Spacer(Modifier.height(10.dp))
+                                Text(aiResponse, color = Color(0xFFEDEDEF), fontSize = 12.sp, lineHeight = 18.sp)
+                            }
                         }
+                    } else if (aiError != null) {
+                        Text(aiError ?: "", Modifier.fillMaxWidth().background(Color(0xFF1D1718), RoundedCornerShape(14.dp)).padding(13.dp), color = Color(0xFFFF858A), fontSize = 12.sp, lineHeight = 18.sp)
+                    } else if (aiResponse.isNotBlank()) {
+                        Text(aiResponse, Modifier.fillMaxWidth().background(Color(0xFF171719), RoundedCornerShape(14.dp)).padding(13.dp), color = Color(0xFFEDEDEF), fontSize = 12.sp, lineHeight = 18.sp)
                     } else {
-                        Text("Опиши, что хочешь создать для Glyph Matrix.", color = Muted, fontSize = 12.sp)
+                        Text("Опиши, что хочешь создать для Glyph Matrix. Glyph Intelligence сначала подготовит план и дождётся подтверждения.", color = Muted, fontSize = 12.sp)
                     }
                     Spacer(Modifier.height(12.dp))
                     OutlinedTextField(
@@ -492,8 +576,17 @@ private fun GlyphLabEditor(
                     )
                     Spacer(Modifier.height(10.dp))
                     Button(onClick = {
-                        if (!generating) { generationFinished = false; generating = true }
-                    }, enabled = !generating, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Accent, disabledContainerColor = Accent.copy(alpha = 0.45f))) {
+                        if (!generating && prompt.isNotBlank()) {
+                            aiResponse = ""
+                            aiError = null
+                            generating = true
+                            onGenerate(
+                                prompt.trim(),
+                                { response -> aiResponse = response },
+                                { error -> generating = false; aiError = error }
+                            )
+                        }
+                    }, enabled = !generating && prompt.isNotBlank(), modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Accent, disabledContainerColor = Accent.copy(alpha = 0.45f))) {
                         if (generating) {
                             CircularProgressIndicator(Modifier.size(17.dp), color = Color.White, strokeWidth = 2.dp)
                             Spacer(Modifier.width(9.dp)); Text("ГЕНЕРАЦИЯ…", letterSpacing = 1.sp, fontSize = 11.sp)
