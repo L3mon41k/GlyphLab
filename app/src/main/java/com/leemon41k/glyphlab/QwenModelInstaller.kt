@@ -74,7 +74,7 @@ internal object QwenModelInstaller {
 
             try {
                 val response = connection.responseCode
-                if (response == HttpURLConnection.HTTP_REQUESTED_RANGE_NOT_SATISFIABLE) {
+                if (response == 416) {
                     partial.delete()
                     continue
                 }
