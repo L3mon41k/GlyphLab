@@ -152,7 +152,7 @@ internal object QwenModelInstaller {
                 onProgress(ModelDownloadProgress(read, total, stage = "ПРОВЕРКА ЦЕЛОСТНОСТИ"))
             }
         }
-        return digest.digest().joinToString("") { "%02x".format(it) }
+        return digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
     }
 }
 
