@@ -278,7 +278,7 @@ private fun GlyphLabEditor(
                             Slider(opacity, { opacity = it }, colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent))
                         }
                         EditorMode.ANIMATION, EditorMode.TOYS -> {
-                            Text("Скорость: ${String.format("%.1f", frameSpeed)}×", color = Muted, fontSize = 11.sp)
+                            Text("Скорость: ${frameSpeed}×", color = Muted, fontSize = 11.sp)
                             Slider(frameSpeed, { frameSpeed = it }, valueRange = 0.2f..3f, colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent))
                             Text("Прозрачность", color = Muted, fontSize = 11.sp)
                             Slider(opacity, { opacity = it }, colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent))
