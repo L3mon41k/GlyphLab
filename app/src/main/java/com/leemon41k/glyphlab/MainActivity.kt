@@ -163,7 +163,7 @@ class MainActivity : ComponentActivity() {
             try {
                 withContext(Dispatchers.IO) {
                     conversation.sendMessageAsync(prompt).collect { message ->
-                        val response = message.text
+                        val response = message.toString()
                         withContext(Dispatchers.Main) { onText(response) }
                     }
                 }
