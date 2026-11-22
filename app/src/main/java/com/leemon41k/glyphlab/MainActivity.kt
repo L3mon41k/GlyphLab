@@ -4,6 +4,7 @@ import android.app.ActivityManager
 import android.app.ApplicationExitInfo
 import android.content.ComponentName
 import android.os.Bundle
+import java.io.File
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
@@ -81,6 +82,7 @@ class MainActivity : ComponentActivity() {
     private var glyphReady = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        installCrashDiagnostics()
         super.onCreate(savedInstanceState)
         previousCrashReport.value = readPreviousCrashReport()
         connectGlyphMatrix()
@@ -112,11 +114,11 @@ class MainActivity : ComponentActivity() {
                     }
                     previousCrashReport.value?.let { report ->
                         AlertDialog(
-                            onDismissRequest = { previousCrashReport.value = null },
+                            onDismissRequest = { dismissCrashReport() },
                             title = { Text("ДИАГНОСТИКА ПРЕДЫДУЩЕГО ЗАПУСКА") },
                             text = { Text(report) },
                             confirmButton = {
-                                TextButton(onClick = { previousCrashReport.value = null }) {
+                                TextButton(onClick = { dismissCrashReport() }) {
                                     Text("ПОНЯТНО")
                                 }
                             }
@@ -128,7 +130,37 @@ class MainActivity : ComponentActivity() {
         startModelSetup()
     }
 
+    private fun installCrashDiagnostics() {
+        val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            try {
+                val runtime = Runtime.getRuntime()
+                val memory = "\n\nПАМЯТЬ: свободно ${(runtime.freeMemory() / 1024 / 1024)} МБ из ${(runtime.totalMemory() / 1024 / 1024)} МБ; максимум ${(runtime.maxMemory() / 1024 / 1024)} МБ."
+                val report = buildString {
+                    appendLine("GLYPHLAB JAVA/KOTLIN CRASH")
+                    appendLine("Время: ${java.text.SimpleDateFormat(\"yyyy-MM-dd HH:mm:ss.SSS\", java.util.Locale.US).format(java.util.Date())}")
+                    appendLine("Поток: ${thread.name} (id=${thread.id})")
+                    appendLine("Исключение: ${error.javaClass.name}: ${error.message}")
+                    appendLine(memory)
+                    appendLine("\nСТЕК ВЫЗОВОВ:")
+                    append(error.stackTraceToString())
+                }
+                File(filesDir, "glyphlab_last_crash.txt").writeText(report)
+            } catch (_: Throwable) { }
+            previousHandler?.uncaughtException(thread, error)
+        }
+    }
+
+    private fun dismissCrashReport() {
+        previousCrashReport.value = null
+        runCatching { File(filesDir, "glyphlab_last_crash.txt").delete() }
+    }
+
     private fun readPreviousCrashReport(): String? {
+        val saved = runCatching {
+            File(filesDir, "glyphlab_last_crash.txt").takeIf { it.exists() }?.readText()?.take(12000)
+        }.getOrNull()?.takeIf { it.isNotBlank() }
+        if (saved != null) return saved
         val activityManager = getSystemService(ActivityManager::class.java) ?: return null
         val preferences = getSharedPreferences("glyphlab_diagnostics", MODE_PRIVATE)
         val lastReported = preferences.getLong("last_reported_exit", 0L)
@@ -219,16 +251,29 @@ class MainActivity : ComponentActivity() {
         }
         lifecycleScope.launch {
             try {
+                writeDiagnosticEvent("GENERATION_START promptLength=${prompt.length}")
                 withContext(Dispatchers.IO) {
+                    writeDiagnosticEvent("LITERT_SEND_MESSAGE_BEGIN")
                     conversation.sendMessageAsync(prompt).collect { message ->
+                        writeDiagnosticEvent("LITERT_MESSAGE_RECEIVED")
                         val response = message.toString()
                         withContext(Dispatchers.Main) { onText(response) }
                     }
+                    writeDiagnosticEvent("LITERT_FLOW_COMPLETED")
                 }
                 onComplete(null)
             } catch (error: Exception) {
+                writeDiagnosticEvent("GENERATION_EXCEPTION ${error.javaClass.name}: ${error.message}\\n${error.stackTraceToString()}")
                 onComplete(error.localizedMessage ?: "Ошибка генерации.")
             }
+        }
+    }
+
+    private fun writeDiagnosticEvent(event: String) {
+        runCatching {
+            val runtime = Runtime.getRuntime()
+            val memory = "free=${runtime.freeMemory() / 1024 / 1024}MB total=${runtime.totalMemory() / 1024 / 1024}MB max=${runtime.maxMemory() / 1024 / 1024}MB"
+            File(filesDir, "glyphlab_diagnostics.log").appendText("${System.currentTimeMillis()} | $event | $memory\\n")
         }
     }
 
