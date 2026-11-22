@@ -1,10 +1,7 @@
 package com.leemon41k.glyphlab
 
-import android.app.ActivityManager
-import android.app.ApplicationExitInfo
 import android.content.ComponentName
 import android.os.Bundle
-import java.io.File
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
@@ -45,21 +42,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.google.ai.edge.litertlm.Backend
-import com.google.ai.edge.litertlm.Contents
-import com.google.ai.edge.litertlm.Conversation
-import com.google.ai.edge.litertlm.ConversationConfig
-import com.google.ai.edge.litertlm.Engine
-import com.google.ai.edge.litertlm.EngineConfig
-import com.google.ai.edge.litertlm.SamplerConfig
-import androidx.lifecycle.lifecycleScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import com.nothing.ketchum.Glyph
 import com.nothing.ketchum.GlyphMatrixManager
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.drop
 import kotlin.math.floor
 
@@ -73,18 +58,10 @@ private val Muted = Color(0xFF85858B)
 class MainActivity : ComponentActivity() {
     private var glyphManager: GlyphMatrixManager? = null
     private val glyphStatus = mutableStateOf("ПОДКЛЮЧЕНИЕ К GLYPH MATRIX…")
-    private val modelProgress = mutableStateOf(ModelDownloadProgress())
-    private val modelError = mutableStateOf<String?>(null)
-    private val modelReady = mutableStateOf(false)
-    private val previousCrashReport = mutableStateOf<String?>(null)
-    private var qwenEngine: Engine? = null
-    private var qwenConversation: Conversation? = null
     private var glyphReady = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        installCrashDiagnostics()
         super.onCreate(savedInstanceState)
-        previousCrashReport.value = readPreviousCrashReport()
         connectGlyphMatrix()
         setContent {
             MaterialTheme(
@@ -94,186 +71,17 @@ class MainActivity : ComponentActivity() {
                     onSurface = Color.White, secondary = Accent
                 )
             ) {
-                Box(Modifier.fillMaxSize()) {
-                    if (modelReady.value) {
-                        GlyphLabEditor(
-                            glyphStatus = glyphStatus.value,
-                            onShowOnGlyph = { showOnGlyph(it) },
-                            onUpdateGlyph = { updateGlyphFrame(it) },
-                            onTurnOffGlyph = { turnOffGlyph() },
-                            onGenerate = { prompt, onText, onComplete ->
-                                generateWithQwen(prompt, onText, onComplete)
-                            }
-                        )
-                    } else {
-                        ModelSetupScreen(
-                            progress = modelProgress.value,
-                            error = modelError.value,
-                            onRetry = { startModelSetup() }
-                        )
+                GlyphLabEditor(
+                    glyphStatus = glyphStatus.value,
+                    onShowOnGlyph = { showOnGlyph(it) },
+                    onUpdateGlyph = { updateGlyphFrame(it) },
+                    onTurnOffGlyph = { turnOffGlyph() },
+                    onGenerate = { _, onText, onComplete ->
+                        onText("Glyph Intelligence временно отключён. Серверный API ещё не подключён. Редактор продолжает работать; подключение облачной модели появится после настройки безопасного серверного посредника.")
+                        onComplete(null)
                     }
-                    previousCrashReport.value?.let { report ->
-                        AlertDialog(
-                            onDismissRequest = { dismissCrashReport() },
-                            title = { Text("ДИАГНОСТИКА ПРЕДЫДУЩЕГО ЗАПУСКА") },
-                            text = { Text(report) },
-                            confirmButton = {
-                                TextButton(onClick = { dismissCrashReport() }) {
-                                    Text("ПОНЯТНО")
-                                }
-                            }
-                        )
-                    }
-                }
-            }
-        }
-        startModelSetup()
-    }
-
-    private fun installCrashDiagnostics() {
-        val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
-        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
-            try {
-                val runtime = Runtime.getRuntime()
-                val memory = "\n\nПАМЯТЬ: свободно ${(runtime.freeMemory() / 1024 / 1024)} МБ из ${(runtime.totalMemory() / 1024 / 1024)} МБ; максимум ${(runtime.maxMemory() / 1024 / 1024)} МБ."
-                val report = buildString {
-                    appendLine("GLYPHLAB JAVA/KOTLIN CRASH")
-                    appendLine("Время: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date())}")
-                    appendLine("Поток: ${thread.name} (id=${thread.id})")
-                    appendLine("Исключение: ${error.javaClass.name}: ${error.message}")
-                    appendLine(memory)
-                    appendLine("\nСТЕК ВЫЗОВОВ:")
-                    append(error.stackTraceToString())
-                }
-                File(filesDir, "glyphlab_last_crash.txt").writeText(report)
-            } catch (_: Throwable) { }
-            previousHandler?.uncaughtException(thread, error)
-        }
-    }
-
-    private fun dismissCrashReport() {
-        previousCrashReport.value = null
-        runCatching { File(filesDir, "glyphlab_last_crash.txt").delete() }
-    }
-
-    private fun readPreviousCrashReport(): String? {
-        val saved = runCatching {
-            File(filesDir, "glyphlab_last_crash.txt").takeIf { it.exists() }?.readText()?.take(12000)
-        }.getOrNull()?.takeIf { it.isNotBlank() }
-        if (saved != null) return saved
-        val activityManager = getSystemService(ActivityManager::class.java) ?: return null
-        val preferences = getSharedPreferences("glyphlab_diagnostics", MODE_PRIVATE)
-        val lastReported = preferences.getLong("last_reported_exit", 0L)
-        val exit = activityManager.getHistoricalProcessExitReasons(packageName, 0, 8)
-            .firstOrNull { info ->
-                info.timestamp > lastReported && info.reason in setOf(
-                    ApplicationExitInfo.REASON_CRASH,
-                    ApplicationExitInfo.REASON_CRASH_NATIVE,
-                    ApplicationExitInfo.REASON_LOW_MEMORY,
-                    ApplicationExitInfo.REASON_SIGNALED,
-                    ApplicationExitInfo.REASON_ANR,
-                    ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE
                 )
-            } ?: return null
-
-        preferences.edit().putLong("last_reported_exit", exit.timestamp).apply()
-        val reason = when (exit.reason) {
-            ApplicationExitInfo.REASON_CRASH -> "Ошибка Java/Kotlin (необработанное исключение)."
-            ApplicationExitInfo.REASON_CRASH_NATIVE -> "Аварийное завершение нативного кода. Возможен сбой LiteRT-LM."
-            ApplicationExitInfo.REASON_LOW_MEMORY -> "Android завершил приложение из-за нехватки оперативной памяти."
-            ApplicationExitInfo.REASON_SIGNALED -> "Процесс завершён системным сигналом (код " + exit.status + ")."
-            ApplicationExitInfo.REASON_ANR -> "Приложение перестало отвечать системе."
-            ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE -> "Android завершил приложение из-за чрезмерного расхода ресурсов."
-            else -> "Неизвестная причина."
-        }
-        val memory = if (exit.rss > 0) "\nПамять процесса перед завершением: " + (exit.rss / 1024) + " МБ." else ""
-        val details = exit.description?.takeIf { it.isNotBlank() }?.let { "\nСведения Android: $it" } ?: ""
-        val trace = runCatching {
-            exit.traceInputStream?.use { stream ->
-                stream.bufferedReader().readText().take(6000)
             }
-        }.getOrNull()?.takeIf { it.isNotBlank() }
-        val stack = trace?.let { "\n\nСТЕК ОШИБКИ:\n$it" }
-            ?: "\n\nAndroid не предоставил стек ошибки для этого завершения."
-        return "$reason$memory$details$stack"
-    }
-
-    private fun startModelSetup() {
-        modelError.value = null
-        lifecycleScope.launch {
-            try {
-                val modelFile = QwenModelInstaller.ensureInstalled(this@MainActivity) { progress ->
-                    withContext(Dispatchers.Main) { modelProgress.value = progress }
-                }
-                modelProgress.value = ModelDownloadProgress(
-                    modelFile.length(), modelFile.length(), stage = "ЗАПУСК НЕЙРОСЕТИ"
-                )
-                val engine = withContext(Dispatchers.IO) {
-                    Engine(
-                        EngineConfig(
-                            modelPath = modelFile.absolutePath,
-                            backend = Backend.CPU(),
-                            cacheDir = cacheDir.absolutePath,
-                            maxNumTokens = 1024
-                        )
-                    ).apply { initialize() }
-                }
-                val conversation = withContext(Dispatchers.IO) {
-                    engine.createConversation(
-                        ConversationConfig(
-                            systemInstruction = Contents.of(GlyphKnowledgeBase.systemInstruction),
-                            samplerConfig = SamplerConfig(temperature = 0.25, topK = 24, topP = 0.9),
-                            maxOutputToken = 128
-                        )
-                    )
-                }
-                qwenEngine = engine
-                qwenConversation = conversation
-                modelProgress.value = ModelDownloadProgress(
-                    modelFile.length(), modelFile.length(), stage = "GLYPH INTELLIGENCE ГОТОВ"
-                )
-                modelReady.value = true
-            } catch (error: Exception) {
-                modelError.value = error.localizedMessage ?: "Не удалось подготовить локальную нейросеть."
-            }
-        }
-    }
-
-    private fun generateWithQwen(
-        prompt: String,
-        onText: (String) -> Unit,
-        onComplete: (String?) -> Unit
-    ) {
-        val conversation = qwenConversation
-        if (conversation == null) {
-            onComplete("Нейросеть ещё не готова. Повторите подготовку модели.")
-            return
-        }
-        lifecycleScope.launch {
-            try {
-                writeDiagnosticEvent("GENERATION_START promptLength=${prompt.length}")
-                withContext(Dispatchers.IO) {
-                    writeDiagnosticEvent("LITERT_SEND_MESSAGE_BEGIN")
-                    conversation.sendMessageAsync(prompt).collect { message ->
-                        writeDiagnosticEvent("LITERT_MESSAGE_RECEIVED")
-                        val response = message.toString()
-                        withContext(Dispatchers.Main) { onText(response) }
-                    }
-                    writeDiagnosticEvent("LITERT_FLOW_COMPLETED")
-                }
-                onComplete(null)
-            } catch (error: Exception) {
-                writeDiagnosticEvent("GENERATION_EXCEPTION ${error.javaClass.name}: ${error.message}\\n${error.stackTraceToString()}")
-                onComplete(error.localizedMessage ?: "Ошибка генерации.")
-            }
-        }
-    }
-
-    private fun writeDiagnosticEvent(event: String) {
-        runCatching {
-            val runtime = Runtime.getRuntime()
-            val memory = "free=${runtime.freeMemory() / 1024 / 1024}MB total=${runtime.totalMemory() / 1024 / 1024}MB max=${runtime.maxMemory() / 1024 / 1024}MB"
-            File(filesDir, "glyphlab_diagnostics.log").appendText("${System.currentTimeMillis()} | $event | $memory\\n")
         }
     }
 
@@ -339,10 +147,6 @@ class MainActivity : ComponentActivity() {
         } catch (_: Exception) {}
         glyphReady = false
         glyphManager = null
-        try { qwenConversation?.close() } catch (_: Exception) {}
-        try { qwenEngine?.close() } catch (_: Exception) {}
-        qwenConversation = null
-        qwenEngine = null
         super.onDestroy()
     }
 }
