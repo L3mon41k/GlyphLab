@@ -6,32 +6,28 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Redo
+import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.Button
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -39,18 +35,24 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nothing.ketchum.Glyph
 import com.nothing.ketchum.GlyphMatrixManager
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.drop
-import androidx.compose.runtime.snapshotFlow
 import kotlin.math.floor
+import kotlin.random.Random
 
 private const val MATRIX_SIZE = 25
 private const val MATRIX_CELLS = MATRIX_SIZE * MATRIX_SIZE
 private const val GRID_SCALE = 0.86f
+private val Accent = Color(0xFFFF3038)
+private val Panel = Color(0xFF151517)
+private val Muted = Color(0xFF85858B)
 
 class MainActivity : ComponentActivity() {
     private var glyphManager: GlyphMatrixManager? = null
@@ -61,18 +63,17 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         connectGlyphMatrix()
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme(
-                background = Color.Black,
-                surface = Color(0xFF111111),
-                primary = Color.White,
-                onPrimary = Color.Black,
-                onBackground = Color.White,
-                onSurface = Color.White
-            )) {
+            MaterialTheme(
+                colorScheme = darkColorScheme(
+                    background = Color.Black, surface = Panel, primary = Accent,
+                    onPrimary = Color.White, onBackground = Color.White,
+                    onSurface = Color.White, secondary = Accent
+                )
+            ) {
                 GlyphLabEditor(
                     glyphStatus = glyphStatus.value,
-                    onShowOnGlyph = { pixels -> showOnGlyph(pixels) },
-                    onUpdateGlyph = { pixels -> updateGlyphFrame(pixels) },
+                    onShowOnGlyph = { showOnGlyph(it) },
+                    onUpdateGlyph = { updateGlyphFrame(it) },
                     onTurnOffGlyph = { turnOffGlyph() }
                 )
             }
@@ -89,19 +90,18 @@ class MainActivity : ComponentActivity() {
                         manager.register(Glyph.DEVICE_23112)
                         glyphReady = true
                         runOnUiThread { glyphStatus.value = "GLYPH MATRIX ПОДКЛЮЧЕНА" }
-                    } catch (error: Exception) {
+                    } catch (_: Exception) {
                         glyphReady = false
                         runOnUiThread { glyphStatus.value = "ОШИБКА РЕГИСТРАЦИИ GLYPH MATRIX" }
                     }
                 }
-
                 override fun onServiceDisconnected(componentName: ComponentName) {
                     glyphReady = false
                     runOnUiThread { glyphStatus.value = "GLYPH MATRIX ОТКЛЮЧЕНА" }
                 }
             }
             manager.init(callback)
-        } catch (error: Exception) {
+        } catch (_: Exception) {
             glyphReady = false
             glyphStatus.value = "GLYPH MATRIX НЕДОСТУПНА"
         }
@@ -110,45 +110,44 @@ class MainActivity : ComponentActivity() {
     private fun makeFrame(pixels: List<Boolean>) = IntArray(MATRIX_CELLS) { index ->
         if (pixels.getOrNull(index) == true) 2047 else 0
     }
-
     private fun showOnGlyph(pixels: List<Boolean>) {
         if (!glyphReady || glyphManager == null) {
-            glyphStatus.value = "СНАЧАЛА ДОЖДИТЕСЬ ПОДКЛЮЧЕНИЯ GLYPH"
+            glyphStatus.value = "GLYPH MATRIX ПОКА НЕДОСТУПНА"
             return
         }
         updateGlyphFrame(pixels)
         glyphStatus.value = "ОТОБРАЖЕНИЕ GLYPH ВКЛЮЧЕНО"
     }
-
     private fun updateGlyphFrame(pixels: List<Boolean>) {
         val manager = glyphManager
         if (!glyphReady || manager == null) return
         try {
             manager.setAppMatrixFrame(makeFrame(pixels))
-        } catch (error: Exception) {
+        } catch (_: Exception) {
             glyphStatus.value = "НЕ УДАЛОСЬ ОБНОВИТЬ GLYPH MATRIX"
         }
     }
-
     private fun turnOffGlyph() {
         try {
             glyphManager?.closeAppMatrix()
             glyphStatus.value = "ОТОБРАЖЕНИЕ GLYPH ВЫКЛЮЧЕНО"
-        } catch (error: Exception) {
+        } catch (_: Exception) {
             glyphStatus.value = "НЕ УДАЛОСЬ ВЫКЛЮЧИТЬ GLYPH"
         }
     }
-
     override fun onDestroy() {
         try {
             glyphManager?.closeAppMatrix()
             glyphManager?.unInit()
-        } catch (_: Exception) {
-        }
+        } catch (_: Exception) {}
         glyphReady = false
         glyphManager = null
         super.onDestroy()
     }
+}
+
+private enum class EditorMode(val title: String) {
+    DRAW("Рисунки"), ANIMATION("Анимации"), TOYS("Glyph Toys")
 }
 
 @Composable
@@ -158,191 +157,274 @@ private fun GlyphLabEditor(
     onUpdateGlyph: (List<Boolean>) -> Unit,
     onTurnOffGlyph: () -> Unit
 ) {
-    val pixels = remember {
-        mutableStateListOf<Boolean>().apply {
-            repeat(MATRIX_CELLS) { add(false) }
-        }
-    }
+    val pixels = remember { mutableStateListOf<Boolean>().apply { repeat(MATRIX_CELLS) { add(false) } } }
     val glyphVisible = remember { mutableStateOf(false) }
+    var mode by remember { mutableStateOf(EditorMode.DRAW) }
+    var prompt by remember { mutableStateOf("") }
+    var generating by remember { mutableStateOf(false) }
+    var generationFinished by remember { mutableStateOf(false) }
+    var frameSpeed by remember { mutableFloatStateOf(1f) }
+    var opacity by remember { mutableFloatStateOf(1f) }
+    var progress by remember { mutableIntStateOf(0) }
+    val history = remember { mutableStateListOf<List<Boolean>>() }
+    val redoHistory = remember { mutableStateListOf<List<Boolean>>() }
+    val animatedLetters = remember { mutableStateListOf('A', 'Я', '7') }
 
-    // While the eye is enabled, every edit is immediately mirrored to the physical matrix.
     LaunchedEffect(glyphVisible.value) {
-        if (glyphVisible.value) {
-            snapshotFlow { pixels.toList() }.drop(1).collect { editedPixels ->
-                onUpdateGlyph(editedPixels)
+        if (glyphVisible.value) snapshotFlow { pixels.toList() }.drop(1).collect { onUpdateGlyph(it) }
+    }
+    LaunchedEffect(generating) {
+        if (generating) {
+            generationFinished = false
+            progress = 0
+            val alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZАБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ0123456789"
+            repeat(100) { step ->
+                for (i in animatedLetters.indices) animatedLetters[i] = alphabet[Random.nextInt(alphabet.length)]
+                progress = step + 1
+                delay(100)
             }
+            generating = false
+            generationFinished = true
         }
     }
 
-    val visiblePixelIndices = remember {
-        buildList {
-            val center = MATRIX_SIZE / 2f
-            val pixelHalf = 0.72f / 2f
-            val maxRadius = center - pixelHalf
-            for (row in 0 until MATRIX_SIZE) {
-                for (column in 0 until MATRIX_SIZE) {
-                    val dx = column + 0.5f - center
-                    val dy = row + 0.5f - center
-                    if (dx * dx + dy * dy <= maxRadius * maxRadius) {
-                        add(row * MATRIX_SIZE + column)
-                    }
-                }
-            }
-        }
+    fun saveHistory() {
+        history.add(pixels.toList())
+        if (history.size > 40) history.removeAt(0)
+        redoHistory.clear()
     }
-    val visibleMask = remember {
-        BooleanArray(MATRIX_CELLS).also { mask ->
-            visiblePixelIndices.forEach { mask[it] = true }
-        }
-    }
-    val litCount = visiblePixelIndices.count { pixels[it] }
-
     fun pixelIndex(position: Offset, width: Float): Int? {
         if (width <= 0f) return null
         val gridSide = width * GRID_SCALE
-        val gridStart = (width - gridSide) / 2f
-        val localX = position.x - gridStart
-        val localY = position.y - gridStart
-        if (localX < 0f || localY < 0f || localX >= gridSide || localY >= gridSide) return null
+        val start = (width - gridSide) / 2f
+        val x = position.x - start
+        val y = position.y - start
+        if (x < 0f || y < 0f || x >= gridSide || y >= gridSide) return null
         val cell = gridSide / MATRIX_SIZE
-        val column = floor(localX / cell).toInt()
-        val row = floor(localY / cell).toInt()
+        val column = floor(x / cell).toInt()
+        val row = floor(y / cell).toInt()
         if (column !in 0 until MATRIX_SIZE || row !in 0 until MATRIX_SIZE) return null
-        val dx = localX - gridSide / 2f
-        val dy = localY - gridSide / 2f
+        val dx = x - gridSide / 2f
+        val dy = y - gridSide / 2f
         if (dx * dx + dy * dy > (gridSide / 2f) * (gridSide / 2f)) return null
-        val index = row * MATRIX_SIZE + column
-        return index.takeIf { visibleMask[it] }
+        return row * MATRIX_SIZE + column
     }
+    val litCount = pixels.count { it }
 
-    Surface(modifier = Modifier.fillMaxSize(), color = Color.Black) {
+    Surface(Modifier.fillMaxSize(), color = Color.Black) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black)
-                .padding(horizontal = 20.dp)
-                .padding(top = 68.dp, bottom = 24.dp),
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("GLYPHLAB", fontSize = 25.sp, color = Color.White, letterSpacing = 4.sp)
-            Spacer(Modifier.height(6.dp))
-            Text(
-                "MATRIX PAINTER  ·  25 × 25",
-                fontSize = 11.sp,
-                color = Color(0xFF888888),
-                letterSpacing = 1.5.sp
-            )
-            Spacer(Modifier.height(28.dp))
-
-            Canvas(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(1f)
-                    .pointerInput(Unit) {
-                        detectTapGestures { offset ->
-                            pixelIndex(offset, size.width.toFloat())?.let { index ->
-                                pixels[index] = !pixels[index]
+            Spacer(Modifier.height(42.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("GLYPHLAB", fontSize = 25.sp, fontWeight = FontWeight.Black, letterSpacing = 4.sp)
+                    Text("MATRIX CREATOR", fontSize = 10.sp, color = Muted, letterSpacing = 2.sp)
+                }
+                Box(Modifier.border(1.dp, Accent.copy(alpha = 0.7f), RoundedCornerShape(50)).padding(horizontal = 12.dp, vertical = 7.dp)) {
+                    Text("BETA 0.3.0", color = Accent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+            Spacer(Modifier.height(22.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = {
+                    glyphVisible.value = !glyphVisible.value
+                    if (glyphVisible.value) onShowOnGlyph(pixels.toList()) else onTurnOffGlyph()
+                }) {
+                    Icon(if (glyphVisible.value) Icons.Default.Visibility else Icons.Default.VisibilityOff, "Переключить вывод на Glyph Matrix", tint = if (glyphVisible.value) Accent else Muted)
+                }
+                Text("GLYPH MATRIX  ·  25 × 25", color = Muted, fontSize = 10.sp, letterSpacing = 1.3.sp)
+                Row {
+                    IconButton(enabled = history.isNotEmpty(), onClick = {
+                        redoHistory.add(pixels.toList())
+                        history.removeAt(history.lastIndex).forEachIndexed { i, v -> pixels[i] = v }
+                    }) { Icon(Icons.Default.Undo, "Undo", tint = if (history.isNotEmpty()) Color.White else Muted) }
+                    IconButton(enabled = redoHistory.isNotEmpty(), onClick = {
+                        history.add(pixels.toList())
+                        redoHistory.removeAt(redoHistory.lastIndex).forEachIndexed { i, v -> pixels[i] = v }
+                    }) { Icon(Icons.Default.Redo, "Redo", tint = if (redoHistory.isNotEmpty()) Color.White else Muted) }
+                }
+            }
+            MatrixPreview(pixels, { index -> saveHistory(); pixels[index] = !pixels[index] }, ::pixelIndex)
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("$litCount / 489 PIXELS", color = Muted, fontSize = 10.sp, letterSpacing = 1.sp)
+                Spacer(Modifier.weight(1f))
+                Text(glyphStatus, color = Muted, fontSize = 9.sp, textAlign = TextAlign.End)
+            }
+            Spacer(Modifier.height(20.dp))
+            LazyRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(EditorMode.values().toList()) { item ->
+                    val selected = mode == item
+                    Box(Modifier.background(if (selected) Accent else Panel, RoundedCornerShape(50)).clickable { mode = item }.padding(horizontal = 16.dp, vertical = 11.dp)) {
+                        Text(item.title, color = if (selected) Color.White else Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+            Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
+                Column(Modifier.padding(16.dp)) {
+                    Text(when (mode) {
+                        EditorMode.DRAW -> "ИНСТРУМЕНТЫ РИСУНКА"
+                        EditorMode.ANIMATION -> "ПАРАМЕТРЫ АНИМАЦИИ"
+                        EditorMode.TOYS -> "ПАРАМЕТРЫ GLYPH TOY"
+                    }, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+                    Spacer(Modifier.height(12.dp))
+                    when (mode) {
+                        EditorMode.DRAW -> {
+                            Text("Прозрачность выбранных пикселей", color = Muted, fontSize = 11.sp)
+                            Slider(opacity, { opacity = it }, colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent))
+                        }
+                        EditorMode.ANIMATION, EditorMode.TOYS -> {
+                            Text("Скорость: \${String.format("%.1f", frameSpeed)}×", color = Muted, fontSize = 11.sp)
+                            Slider(frameSpeed, { frameSpeed = it }, valueRange = 0.2f..3f, colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent))
+                            Text("Прозрачность", color = Muted, fontSize = 11.sp)
+                            Slider(opacity, { opacity = it }, colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent))
+                            if (mode == EditorMode.TOYS) {
+                                OutlinedButton(onClick = {}, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.outlinedButtonColors(contentColor = Accent), border = androidx.compose.foundation.BorderStroke(1.dp, Accent.copy(alpha = 0.65f))) {
+                                    Text("Создать анимацию для долгого нажатия")
+                                }
                             }
                         }
                     }
-                    .pointerInput(Unit) {
-                        var eraseMode = false
-                        detectDragGestures(
-                            onDragStart = { offset ->
-                                val index = pixelIndex(offset, size.width.toFloat())
-                                if (index != null) {
-                                    eraseMode = pixels[index]
-                                    pixels[index] = !eraseMode
-                                }
-                            },
-                            onDrag = { change, _ ->
-                                pixelIndex(change.position, size.width.toFloat())?.let { index ->
-                                    pixels[index] = !eraseMode
-                                }
-                                change.consume()
-                            }
-                        )
+                    Spacer(Modifier.height(4.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { saveHistory(); pixels.indices.forEach { pixels[it] = false } }, modifier = Modifier.weight(1f)) {
+                            Icon(Icons.Default.Delete, null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("Очистить")
+                        }
+                        Button(onClick = {}, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Accent)) {
+                            Text(if (mode == EditorMode.TOYS) "Добавить Toy" else "Экспорт")
+                        }
                     }
-            ) {
-                val panelCenter = size.width / 2f
-                val panelRadius = panelCenter - 1.5.dp.toPx()
-                val gridSide = size.width * GRID_SCALE
-                val gridStart = (size.width - gridSide) / 2f
-                val cell = gridSide / MATRIX_SIZE
-                val pixelSize = cell * 0.72f
-
-                // Larger circular rim around the inset 25x25 square LED layout.
-                drawCircle(
-                    color = Color(0xFF171719),
-                    radius = panelRadius,
-                    center = Offset(panelCenter, panelCenter)
-                )
-                drawCircle(
-                    color = Color(0xFF45454A),
-                    radius = panelRadius,
-                    center = Offset(panelCenter, panelCenter),
-                    style = Stroke(width = 2.dp.toPx())
-                )
-
-                for (index in visiblePixelIndices) {
-                    val row = index / MATRIX_SIZE
-                    val column = index % MATRIX_SIZE
-                    val x = gridStart + (column + 0.5f) * cell
-                    val y = gridStart + (row + 0.5f) * cell
-                    drawRect(
-                        color = if (pixels[index]) Color.White else Color(0xFF050506),
-                        topLeft = Offset(x - pixelSize / 2f, y - pixelSize / 2f),
-                        size = Size(pixelSize, pixelSize)
-                    )
                 }
             }
-
             Spacer(Modifier.height(18.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "$litCount / ${visiblePixelIndices.size} PIXELS",
-                    color = Color(0xFFAAAAAA),
-                    fontSize = 12.sp,
-                    letterSpacing = 1.sp
-                )
-                Button(onClick = {
-                    for (i in pixels.indices) pixels[i] = false
-                }) {
-                    Text("CLEAR")
+            Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFF101012)), shape = RoundedCornerShape(20.dp)) {
+                Column(Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(30.dp).background(Accent, CircleShape), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.AutoAwesome, null, tint = Color.White, modifier = Modifier.size(17.dp))
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Column {
+                            Text("GLYPH INTELLIGENCE", fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                            Text("AI ASSISTANT", fontSize = 9.sp, color = Muted, letterSpacing = 1.5.sp)
+                        }
+                        Spacer(Modifier.weight(1f))
+                        Text("PREVIEW", color = Accent, fontSize = 9.sp, letterSpacing = 1.sp)
+                    }
+                    Spacer(Modifier.height(14.dp))
+                    if (generating) {
+                        GenerationAnimation(animatedLetters.toList(), progress)
+                    } else if (generationFinished) {
+                        Row(Modifier.fillMaxWidth().background(Color(0xFF1D1718), RoundedCornerShape(14.dp)).padding(13.dp), verticalAlignment = Alignment.Top) {
+                            Icon(Icons.Default.Close, null, tint = Accent, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Glyph Intelligence пока не подключён. Подключение нейросети и генерация станут доступны в одном из следующих обновлений.", color = Color(0xFFE4D6D7), fontSize = 12.sp, lineHeight = 18.sp)
+                        }
+                    } else {
+                        Text("Опиши, что хочешь создать для Glyph Matrix.", color = Muted, fontSize = 12.sp)
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = prompt, onValueChange = { prompt = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Например: нарисуй маленькое сердце…", fontSize = 12.sp, color = Muted) },
+                        enabled = !generating, minLines = 2, maxLines = 4,
+                        shape = RoundedCornerShape(14.dp),
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Accent, unfocusedBorderColor = Color(0xFF38383D), cursorColor = Accent, focusedTextColor = Color.White, unfocusedTextColor = Color.White)
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Button(onClick = {
+                        if (!generating) { generationFinished = false; generating = true }
+                    }, enabled = !generating, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Accent, disabledContainerColor = Accent.copy(alpha = 0.45f))) {
+                        if (generating) {
+                            CircularProgressIndicator(Modifier.size(17.dp), color = Color.White, strokeWidth = 2.dp)
+                            Spacer(Modifier.width(9.dp)); Text("ГЕНЕРАЦИЯ…", letterSpacing = 1.sp, fontSize = 11.sp)
+                        } else {
+                            Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(17.dp))
+                            Spacer(Modifier.width(8.dp)); Text("СОЗДАТЬ", letterSpacing = 1.5.sp, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             }
-            Spacer(Modifier.height(12.dp))
-            Text(
-                glyphStatus,
-                color = Color(0xFF888888),
-                fontSize = 10.sp,
-                letterSpacing = 0.7.sp
-            )
-            Spacer(Modifier.height(8.dp))
-            IconButton(
-                onClick = {
-                    val nextVisible = !glyphVisible.value
-                    glyphVisible.value = nextVisible
-                    if (nextVisible) onShowOnGlyph(pixels.toList()) else onTurnOffGlyph()
+            Spacer(Modifier.height(28.dp))
+        }
+    }
+}
+
+@Composable
+private fun MatrixPreview(pixels: SnapshotStateList<Boolean>, onPixel: (Int) -> Unit, pixelIndex: (Offset, Float) -> Int?) {
+    Canvas(Modifier.fillMaxWidth().aspectRatio(1f)
+        .pointerInput(Unit) {
+            detectTapGestures { pos -> pixelIndex(pos, size.width.toFloat())?.let(onPixel) }
+        }
+        .pointerInput(Unit) {
+            var eraseMode = false
+            var lastIndex = -1
+            detectDragGestures(onDragStart = { pos ->
+                lastIndex = pixelIndex(pos, size.width.toFloat()) ?: -1
+                if (lastIndex >= 0) { eraseMode = pixels[lastIndex]; onPixel(lastIndex) }
+            }, onDrag = { change, _ ->
+                val index = pixelIndex(change.position, size.width.toFloat())
+                if (index != null && index != lastIndex) {
+                    lastIndex = index
+                    if (pixels[index] == eraseMode) onPixel(index)
                 }
-            ) {
-                Icon(
-                    imageVector = if (glyphVisible.value) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                    contentDescription = if (glyphVisible.value) "Скрыть Glyph Matrix" else "Показать на Glyph Matrix",
-                    tint = if (glyphVisible.value) Color.White else Color(0xFF888888)
-                )
+                change.consume()
+            })
+        }
+    ) {
+        val center = size.width / 2f
+        val radius = center - 1.5.dp.toPx()
+        val gridSide = size.width * GRID_SCALE
+        val start = (size.width - gridSide) / 2f
+        val cell = gridSide / MATRIX_SIZE
+        val pixelSize = cell * 0.72f
+        drawCircle(Color(0xFF18181B), radius, Offset(center, center))
+        drawCircle(Color(0xFF44444A), radius, Offset(center, center), style = Stroke(2.dp.toPx()))
+        for (row in 0 until MATRIX_SIZE) for (column in 0 until MATRIX_SIZE) {
+            val dx = column + 0.5f - MATRIX_SIZE / 2f
+            val dy = row + 0.5f - MATRIX_SIZE / 2f
+            if (dx * dx + dy * dy <= 12.15f * 12.15f) {
+                val index = row * MATRIX_SIZE + column
+                val x = start + (column + 0.5f) * cell
+                val y = start + (row + 0.5f) * cell
+                drawRect(if (pixels[index]) Color(0xFFFFF4F4) else Color(0xFF080809), Offset(x - pixelSize / 2f, y - pixelSize / 2f), Size(pixelSize, pixelSize))
             }
-            Spacer(Modifier.weight(1f))
-            Text(
-                "TAP TO TOGGLE  ·  DRAG TO DRAW / ERASE",
-                color = Color(0xFF666666),
-                fontSize = 10.sp,
-                letterSpacing = 1.sp
-            )
+        }
+    }
+}
+
+@Composable
+private fun GenerationAnimation(letters: List<Char>, progress: Int) {
+    Column(Modifier.fillMaxWidth().background(Color(0xFF080809), RoundedCornerShape(16.dp)).padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("Г Е Н Е Р А Ц И Я", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            letters.forEach { PixelLetter(it) }
+        }
+        Spacer(Modifier.height(12.dp))
+        LinearProgressIndicator(progress = { progress / 100f }, modifier = Modifier.fillMaxWidth().height(3.dp), color = Accent, trackColor = Color(0xFF303034))
+        Spacer(Modifier.height(7.dp))
+        Text("ОБРАБОТКА ЗАПРОСА  $progress%", color = Muted, fontSize = 9.sp, letterSpacing = 1.sp)
+    }
+}
+
+@Composable
+private fun PixelLetter(character: Char) {
+    val seed = character.code
+    Canvas(Modifier.size(width = 42.dp, height = 58.dp)) {
+        val cols = 5
+        val rows = 7
+        val gap = 3.dp.toPx()
+        val cell = (size.width - gap * (cols - 1)) / cols
+        for (y in 0 until rows) for (x in 0 until cols) {
+            val bit = ((seed * 31 + x * 17 + y * 23 + x * y * 7) xor (seed shr ((x + y) % 5))) and 1
+            if (bit == 1 || x == 0 || x == cols - 1 || y == 0 || y == rows - 1) {
+                drawRect(Accent.copy(alpha = if (bit == 1) 0.95f else 0.28f), Offset(x * (cell + gap), y * (cell + gap)), Size(cell, cell))
+            }
         }
     }
 }
